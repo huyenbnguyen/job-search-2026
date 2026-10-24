@@ -101,6 +101,8 @@ With those in place, moving to PostgreSQL is mostly a connection-string change p
 - Pydantic and pytest, both central to the plan, are Python tools.
 - It is already in your core stack.
 
+**Alternatives considered:** none recorded in planning.
+
 ---
 
 ## CLI: Typer + Rich
@@ -113,6 +115,8 @@ With those in place, moving to PostgreSQL is mostly a connection-string change p
 - Rich makes ranked job lists, comparison reports, and evidence tables readable in a terminal.
 - Keeping `cli.py` thin over shared services lets the Phase 6 API reuse the same code.
 
+**Alternatives considered:** a web UI first, deferred to Phase 6 so the core workflow is proven before frontend work (see `scoping.md`, Decision Log: "CLI first"). Other CLI libraries weren't compared.
+
 ---
 
 ## LLM output validation: Pydantic
@@ -123,6 +127,8 @@ With those in place, moving to PostgreSQL is mostly a connection-string change p
 - Structural checks happen in code instead of asking the model to certify itself.
 - Schema-validity rate becomes a measurable metric in every experiment.
 - The same models describe data shared with the database layer and, later, the API.
+
+**Alternatives considered:** asking the model to self-certify its output, rejected because structural checks belong in code (see `scoping.md`, Section 2). Other validation libraries weren't compared.
 
 ---
 
@@ -161,6 +167,8 @@ With those in place, moving to PostgreSQL is mostly a connection-string change p
 **Decision:** pytest for unit, integration, adversarial, and evaluation tests. *Status: decided.*
 
 **Why:** one runner covers code tests and the evaluation harness, and evaluation regressions can run in CI next to unit tests.
+
+**Alternatives considered:** none recorded in planning. A commercial evaluation product is still TBD (see `scoping.md`, Evaluation Framework).
 
 ---
 
@@ -207,6 +215,8 @@ Either can be revisited if the tool is ever hosted, as long as personal data sta
 **Why:**
 - FastAPI is Python and uses Pydantic models, so it can reuse the services and data models directly.
 - The UI comes only after the CLI workflow works, so it wraps proven behavior.
+
+**Alternatives considered:** none recorded in planning for the API or frontend frameworks. Building the UI before the CLI was rejected; see the CLI section.
 
 **Note:** if the tool is ever hosted or shared, authentication and per-user authorization must come first.
 

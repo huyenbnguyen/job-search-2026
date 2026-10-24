@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Instructions for AI coding agents working in this repository. The full design is in `scoping.md`. If this file or a skill disagrees with `scoping.md`, `scoping.md` wins; flag the conflict to the user.
+Instructions for AI coding agents working in this repository. The full design is in `docs/scoping.md`. If this file or a skill disagrees with `docs/scoping.md`, `docs/scoping.md` wins; flag the conflict to the user.
 
 ## Project
 
@@ -130,6 +130,6 @@ These hold everywhere, whether or not a skill is loaded.
 - The change needs a new infrastructure component, framework, or external service.
 - A job source's access terms are unclear.
 - The task would pull work from a later phase into the current one.
-- A decision marked TBD in `scoping.md` (provider, budget, targets) is needed to proceed.
+- A decision marked TBD in `docs/scoping.md` (provider, budget, targets) is needed to proceed.
 - A change would send data off the machine anywhere other than LLM provider calls and permitted job sources.
 - The tool would be hosted or shared. Authentication and per-user authorization must come first.

@@ -6,6 +6,7 @@ description: Rules for the local SQLite database — SQLAlchemy access, Alembic 
 # Database
 
 ## Setup
+- SQLAlchemy and Alembic remain proposed until the relevant phase-start decision. Ask the user before implementing database access or migrations.
 - SQLite, one local file, accessed through SQLAlchemy.
 - The database file lives outside the repository and is never committed. Its path comes from config.
 - Open every connection with WAL mode and a busy timeout, so a scheduled run and a CLI session can overlap safely.

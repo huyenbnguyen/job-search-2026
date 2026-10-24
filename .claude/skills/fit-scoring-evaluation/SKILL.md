@@ -5,7 +5,7 @@ description: Rules for the fit-scoring rubric, human labels, model and prompt ex
 
 # Fit scoring and evaluation
 
-The draft rubric and the full rationale are in `scoping.md`, Section 2 ("Fit-Scoring Rubric").
+The draft rubric and the full rationale are in `docs/scoping.md`, Section 2 ("Fit-Scoring Rubric").
 
 ## Rubric and labels
 - Users and models score on the same 1–5 anchored rubric, stored as a versioned file (proposed: `prompts/job_matching/rubric_v1.md`).
