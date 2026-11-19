@@ -1,6 +1,11 @@
 # Copy to config/config.yaml (gitignored) and adjust. Every key is optional;
 # missing keys use the defaults in src/jobsearch/config.py. No secrets here.
 
+database:
+  # SQLite file. Keep it outside the repository; it holds your job history.
+  path: ~/.local/share/jobsearch/jobsearch.db
+  busy_timeout_ms: 5000
+
 ingestion:
   fetch:
     timeout_seconds: 20.0

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-Phase 1a is in progress. `src/jobsearch/` has typed config, an SSRF-safe fetcher, and job source adapters, plus the `fetch-applied` command, which stages fetched jobs as JSONL (`JobFetchRecord`). `data/` holds personal data and is gitignored.
+Phase 1a is in progress. `src/jobsearch/` has typed config, an SSRF-safe fetcher, and job source adapters, plus the `fetch-applied` command, which stages fetched jobs as JSONL (`JobFetchRecord`) and `db import-jobs` loads them into SQLite (`~/.local/share/jobsearch/jobsearch.db` by default, set by `database.path`). The schema lives in `models/tables.py`, with Alembic migrations in `migrations/`. `alembic.ini` has no URL: `migrations/env.py` reads it from the app config. Tests point at a temporary database by passing `DatabaseConfig` through `config.attributes["database"]`. `data/` holds personal data and is gitignored.
 
 ## Where the design lives
 

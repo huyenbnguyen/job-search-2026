@@ -87,6 +87,8 @@ Keep these current:
 - Run tests: `uv run pytest`; one test: `uv run pytest tests/unit/test_fetch.py::test_redirect_limit`
 - Lint / format / type check: `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`
 - Fetch applied-job details: `uv run jobsearch fetch-applied data/applied_jobs.csv` (writes `data/applied_jobs.jsonl`)
+- Create or upgrade the database: `uv run jobsearch db upgrade` (Alembic; new migration: `uv run alembic revision --autogenerate -m "..."`, then review it)
+- Import fetched jobs: `uv run jobsearch db import-jobs data/applied_jobs.jsonl`
 - Run evaluation: TBD
 
 Run tests, lint, and type checks before saying a change is done.
