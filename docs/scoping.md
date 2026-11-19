@@ -139,22 +139,14 @@ prompts/examples/            # versioned JSON examples, if useful
 
 Record changes and rationale in a prompt changelog or decision log. Do not use held-out test data to tune prompts.
 
-### Fit-Scoring Rubric (Phase 1, draft)
+### Fit-Scoring Rubric (Phase 1)
 
-The user and every model score each job against the same written rubric. Finalize the wording before labeling starts, then version it like a prompt (proposed: `prompts/job_matching/rubric_v1.md`). Changing the rubric means re-labeling or keeping results separate by rubric version.
-
-| Score | Meaning |
-|---|---|
-| 5 | Meets all required qualifications and most preferred ones; seniority matches. |
-| 4 | Meets all or nearly all required qualifications; gaps only in preferred ones. |
-| 3 | Meets most required qualifications, with one notable gap. |
-| 2 | Several required gaps, or a clear seniority mismatch. |
-| 1 | Different field or level. |
+The user and every model score each job against the same written rubric. The current version, with the score anchors, is [`prompts/job_matching/rubric_v1.md`](../prompts/job_matching/rubric_v1.md); that file is the only copy of the wording. A rubric file is never edited once labels use it. A wording change becomes a new file (`rubric_v2.md`), and means re-labeling or keeping results separate by rubric version.
 
 A 1–5 scale is used instead of 0–100 because neither a person nor a model can reliably tell small differences on a fine scale; the extra precision is noise.
 
 **Two separate human labels per job:**
-- **Fit score (1–5):** qualification fit only, judged from the job description and resume. Models are graded against this label.
+- **Fit score (1–5):** qualification fit only, scored on the rubric. Models are graded against this label.
 - **Would apply (yes/no):** includes everything the model cannot see, such as pay, company, and personal interest. Never used to grade the fit scorer; it informs Phase 2 preferences and ranking.
 
 **Model output (validated with Pydantic):**
@@ -184,7 +176,7 @@ A 1–5 scale is used instead of 0–100 because neither a person nor a model ca
 |---|---|
 | Test set size | TBD. Start with the actual applied-job set and increase judged examples over time. If the dataset is small, use repeated cross-validation or leave-one-out where appropriate and report uncertainty; do not imply a tiny set proves generalization. |
 | Test set composition | Previously applied positions after user labels, plus deliberately added lower-fit jobs (expected scores 1–3) so the set spans the full scale; newly discovered positive and negative examples; edge cases for missing descriptions, duplicates, unclear locations, preference conflicts, and (in the final phase) authorization-policy ambiguity. |
-| Scoring rubric | The user and the LLM score on the same 1–5 anchored rubric (draft above). The rubric is versioned like a prompt. |
+| Scoring rubric | The user and the LLM score on the same 1–5 anchored rubric (`prompts/job_matching/rubric_v1.md`). The rubric is versioned like a prompt. |
 | Data splits | Once enough labels exist (Phase 3), split into development and held-out sets. Iterate on development; confirm on held-out. |
 | Metrics | Fit scoring: agreement with human scores (proposed: mean absolute error, rank correlation) against a non-LLM baseline. Job ranking (once discovery exists): NDCG@10, Precision@10, Recall@10. Extraction: field-level accuracy / schema validity. Resume: claim support, semantic preservation, requirement coverage, and human review. Operational: cost / latency / failures. |
 | Tooling | pytest plus a custom, versioned evaluation runner and stored result tables / JSON / CSV reports. Specific commercial evaluation product TBD. |
@@ -527,6 +519,7 @@ External calls: permitted job sources; LLM provider(s)
 | Keep a non-LLM baseline in every comparison | Shows whether an LLM is worth its cost; hard constraints stay deterministic and understandable. |
 | Human scores recorded before model scores | Avoids anchoring the reference labels on model output. |
 | 1–5 anchored rubric instead of 0–100 | Finer scales add noise rather than information; written anchors make human and model scores comparable. |
+| Rubric v1 keeps the draft anchors unchanged | The user labeled the first jobs against the draft wording, so it became `prompts/job_matching/rubric_v1.md` as written. That file is the only copy; any change is a new version. |
 | Separate fit score and would-apply labels | The model only sees the job and resume, so it is graded on qualification fit; interest factors it cannot see are recorded separately. |
 | Requirement-level output with quoted evidence | Quotes can be checked against the resume in code, catching fabricated evidence, and requirement coverage gives a second, deterministic score to compare against. |
 | Cloud and local models both acceptable | Resume text may be sent to cloud providers after checking their data settings; a local model is included as a candidate and kept only if it is competitive. |
@@ -541,7 +534,6 @@ External calls: permitted job sources; LLM provider(s)
 
 ### Open Decisions / Unknowns
 
-- Final wording of the 1–5 rubric anchors (draft in Section 2), to settle before labeling starts.
 - Which job pages can the Phase 1 URL fetcher retrieve reliably, and is a paste-text fallback needed?
 - Thin in-house provider adapters or a multi-provider library?
 - Which job sources are permitted, reliable, and worth integrating first?
