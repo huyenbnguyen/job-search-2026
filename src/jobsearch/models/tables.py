@@ -87,7 +87,7 @@ class JobFetchAttempt(Base):
 class HumanLabel(Base):
     __tablename__ = "human_labels"
     __table_args__ = (
-        CheckConstraint("fit_score BETWEEN 1 AND 5", name="ck_human_labels_fit_score"),
+        CheckConstraint("fit_score IN (1, 2, 3, 4, 5)", name="ck_human_labels_fit_score"),
         Index("ix_human_labels_job_id", "job_id"),
     )
 
@@ -104,7 +104,7 @@ class HumanLabel(Base):
 class FitPrediction(Base):
     __tablename__ = "fit_predictions"
     __table_args__ = (
-        CheckConstraint("fit_score BETWEEN 1 AND 5", name="ck_fit_predictions_fit_score"),
+        CheckConstraint("fit_score IN (1, 2, 3, 4, 5)", name="ck_fit_predictions_fit_score"),
         Index("ix_fit_predictions_job_id", "job_id"),
     )
 

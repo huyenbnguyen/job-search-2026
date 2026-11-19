@@ -517,10 +517,10 @@ def test_label_without_fetched_text_is_allowed(engine: Engine) -> None:
     assert scores(engine) == (2, 0, None)
 
 
-@pytest.mark.parametrize("fit", [0, 6])
-def test_scores_must_be_on_the_1_to_5_scale(engine: Engine, fit: int) -> None:
+@pytest.mark.parametrize("fit", [0, 6, 3.5, 4.01])
+def test_scores_must_be_whole_numbers_from_1_to_5(engine: Engine, fit: float) -> None:
     job_id = _fetched_job(engine)
-    for row in (_label(job_id, fit, True, 1), _prediction(job_id, fit, 1)):
+    for row in (_label(job_id, fit, True, 1), _prediction(job_id, fit, 1)):  # type: ignore[arg-type]
         with pytest.raises(IntegrityError), session_scope(engine) as session:
             session.add(row)
 
@@ -911,3 +911,70 @@ def test_upgrade_to_0008_adds_prediction_details_and_downgrade_removes_it(
     engine.dispose()
     assert "details" not in columns
     assert "resume_version" in columns
+
+
+def test_raw_sql_fractional_score_is_rejected_but_text_digits_become_integers(
+    engine: Engine,
+) -> None:
+    job_id = _fetched_job(engine)
+    insert = (
+        "INSERT INTO human_labels (job_id, fit_score, would_apply, rubric_version, labeled_at) "
+        "VALUES (:job_id, {score}, 1, 'rubric_v1', '2026-02-01 00:00:00')"
+    )
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(text(insert.format(score="3.5")), {"job_id": job_id})
+    with engine.begin() as connection:
+        connection.execute(text(insert.format(score="'4'")), {"job_id": job_id})
+        stored = connection.execute(
+            text("SELECT fit_score, typeof(fit_score) FROM human_labels")
+        ).one()
+    assert tuple(stored) == (4, "integer")
+
+
+def test_upgrade_to_0009_refuses_fractional_scores_and_keeps_the_view(
+    database: DatabaseConfig,
+) -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    upgrade_database(database, "0008")
+    engine = make_engine(database)
+    with engine.begin() as connection:
+        view_before = connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 'jobs_overview'")
+        ).scalar()
+        connection.execute(
+            text(
+                "INSERT INTO jobs (id, job_key, source, source_url, applied, first_seen_at) "
+                "VALUES (1, 'k1', 'greenhouse', 'u1', 1, '2026-01-01 00:00:00')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO human_labels (id, job_id, fit_score, would_apply, rubric_version, "
+                "labeled_at) VALUES (1, 1, 3.5, 1, 'rubric_v1', '2026-01-02 00:00:00')"
+            )
+        )
+    with pytest.raises(RuntimeError, match="1 rows in human_labels"):
+        upgrade_database(database)
+
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE human_labels SET fit_score = 4"))
+    upgrade_database(database)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT human_fit_score FROM jobs_overview")).scalar() == 4
+        view_after = connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 'jobs_overview'")
+        ).scalar()
+    assert view_after == view_before
+
+    config = Config("alembic.ini")
+    config.attributes["database"] = database
+    command.downgrade(config, "0008")
+    with engine.begin() as connection:
+        schema = connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 'human_labels'")
+        ).scalar()
+        assert connection.execute(text("SELECT COUNT(*) FROM jobs_overview")).scalar() == 1
+    engine.dispose()
+    assert "BETWEEN 1 AND 5" in str(schema)

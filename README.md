@@ -90,7 +90,7 @@ Tables:
 
   `jobs` also holds the title and description from the first successful fetch. They're never overwritten, so your labels and model scores always refer to the same text.
 - `job_fetch_attempts`: every fetch outcome, including closed or blocked jobs. Its `description_hash` shows if a later fetch returned different text.
-- `human_labels`: your fit score (1–5) and would-apply answer for a job, with the rubric version and optional `notes` on your reasoning. Append-only: re-scoring a job adds a row.
+- `human_labels`: your fit score (a whole number, 1–5; the database rejects anything else, such as 3.5) and would-apply answer for a job, with the rubric version and optional `notes` on your reasoning. Append-only: re-scoring a job adds a row.
 - `fit_predictions`: model and baseline fit scores (1–5), each with the job scored and the model, prompt, rubric and resume versions, plus `details` (JSON) on how the score was reached. Kept apart from your labels.
 - `resume_versions`: the extracted text of each distinct resume, with its hash, file name and the extractor used.
 - `jobs_overview` (view): each job with its description, latest fetch status, and the latest `human_fit_score`, `human_would_apply` and `ai_fit_score`. `ai_fit_score` is the latest prediction from any scorer, including the keyword baseline. Hide that column while you label new jobs.
