@@ -39,7 +39,7 @@ The steps below are a proposed breakdown; each one is usable on its own.
 - [ ] Project setup: package layout, typed config, SQLite with WAL mode, Alembic migrations, pytest, CI
 - [ ] `ingest` command: fetch a job URL into a normalized, versioned record with source URL and timestamp; safe against SSRF
 - [ ] Paste-text fallback for pages that can't be fetched
-- [ ] Load your resume (text-based PDF or DOCX) as a versioned profile
+- [ ] Load your resume (text-based PDF or DOCX) as a versioned profile (PDF done: `jobsearch resume load`; DOCX not yet)
 - [ ] `label` command: record a fit score (1–5) and would-apply (yes/no) for each job, with no model scores shown
 - [x] Rubric stored as a versioned file; rubric version saved with every label
 

@@ -43,6 +43,18 @@ Records are stored locally. The only data sent anywhere today is the HTTP reques
 
 These requests are separate from LLM calls, which arrive in a later Phase 1 step. Those will send job and resume text to the LLM provider you configure, and this section will list what each call sends.
 
+## Load your resume
+
+Keep the PDF in `docs/resume/` or `data/`; both are gitignored. Only text-based PDFs work. A scanned image has no text to extract.
+
+```bash
+uv run jobsearch resume load docs/resume/resume.pdf   # extract and store the text
+uv run jobsearch resume show                          # print the newest version's text, as scoring sees it
+uv run jobsearch resume list                          # every stored version
+```
+
+Each distinct text is stored once in `resume_versions` and never overwritten. Loading the same text again, even from a renamed file, adds nothing. Editing the resume and loading it again adds a new version. Model scores record which version they used.
+
 ## Database
 
 Jobs are stored in a local SQLite file, by default `~/.local/share/jobsearch/jobsearch.db`. It lives outside the repository; set `database.path` in `config/config.yaml` to move it.
@@ -65,6 +77,7 @@ Tables:
 - `job_fetch_attempts`: every fetch outcome, including closed or blocked jobs. Its `description_hash` shows if a later fetch returned different text.
 - `human_labels`: your fit score (1–5) and would-apply answer for a job, with the rubric version and optional `notes` on your reasoning. Append-only: re-scoring a job adds a row.
 - `fit_predictions`: model fit scores (1–5), each with the job scored and the model, prompt, rubric and resume versions. Kept apart from your labels.
+- `resume_versions`: the extracted text of each distinct resume, with its hash, file name and the extractor used.
 - `jobs_overview` (view): each job with its description, latest fetch status, and the latest `human_fit_score`, `human_would_apply` and `ai_fit_score`.
 
 Set or correct a company by hand. LinkedIn jobs need this, because their URLs carry no company:

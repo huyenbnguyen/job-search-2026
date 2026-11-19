@@ -1,5 +1,6 @@
 # Personal data: resumes, job lists, fetched jobs, logs, and the database stay local.
 data/
+docs/resume/
 *.db
 *.sqlite
 *.sqlite3

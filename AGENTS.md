@@ -89,6 +89,7 @@ Keep these current:
 - Fetch applied-job details: `uv run jobsearch fetch-applied data/applied_jobs.csv` (writes `data/applied_jobs.jsonl`)
 - Create or upgrade the database: `uv run jobsearch db upgrade` (Alembic; new migration: `uv run alembic revision --autogenerate -m "..."`, then review it)
 - Import fetched jobs: `uv run jobsearch db import-jobs data/applied_jobs.jsonl`
+- Load your resume: `uv run jobsearch resume load docs/resume/<file>.pdf`; check the text with `uv run jobsearch resume show`
 - Run evaluation: TBD
 
 Run tests, lint, and type checks before saying a change is done.

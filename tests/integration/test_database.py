@@ -1,5 +1,6 @@
 """Database workflows against a temporary SQLite file. All data is synthetic."""
 
+import hashlib
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,13 +15,21 @@ from sqlalchemy.exc import IntegrityError
 from jobsearch.config import DatabaseConfig
 from jobsearch.database import make_engine, session_scope
 from jobsearch.models.job import CompanySource, FetchStatus, JobFetchRecord
-from jobsearch.models.tables import Base, FitPrediction, HumanLabel, Job, JobFetchAttempt
+from jobsearch.models.tables import (
+    Base,
+    FitPrediction,
+    HumanLabel,
+    Job,
+    JobFetchAttempt,
+    ResumeVersion,
+)
 from jobsearch.services.job_import import import_records, read_records, set_job_company
 from jobsearch.services.migrations import (
     SchemaOutOfDateError,
     check_schema_current,
     upgrade_database,
 )
+from jobsearch.services.profiles import ParsedResume, save_resume_version
 
 
 @pytest.fixture
@@ -698,3 +707,55 @@ def test_restore_from_backup(database: DatabaseConfig, engine: Engine, tmp_path:
         assert connection.execute(text("PRAGMA integrity_check")).scalar() == "ok"
     assert counts(restored) == (1, 1, 1)
     restored.dispose()
+
+
+def _resume(text: str, filename: str = "resume.pdf") -> ParsedResume:
+    return ParsedResume(
+        text=text,
+        text_hash=hashlib.sha256(text.encode()).hexdigest(),
+        file_hash=hashlib.sha256(filename.encode() + text.encode()).hexdigest(),
+        page_count=1,
+        source_filename=filename,
+    )
+
+
+def test_loading_the_same_resume_text_again_adds_no_version(engine: Engine) -> None:
+    with session_scope(engine) as session:
+        first, created = save_resume_version(session, _resume("Jane Doe\nPython"))
+        assert created
+    with session_scope(engine) as session:
+        again, created = save_resume_version(session, _resume("Jane Doe\nPython", "renamed.pdf"))
+        assert not created
+        assert again.id == first.id
+        assert again.source_filename == "resume.pdf"
+
+
+def test_changed_resume_text_adds_a_version_and_keeps_the_old_one(engine: Engine) -> None:
+    with session_scope(engine) as session:
+        save_resume_version(session, _resume("Jane Doe\nPython"))
+        save_resume_version(session, _resume("Jane Doe\nPython, Go"))
+    with session_scope(engine) as session:
+        texts = session.scalars(select(ResumeVersion.text).order_by(ResumeVersion.id)).all()
+    assert texts == ["Jane Doe\nPython", "Jane Doe\nPython, Go"]
+
+
+def test_upgrade_to_0007_adds_resume_versions_and_downgrade_removes_it(
+    database: DatabaseConfig,
+) -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    upgrade_database(database, "0006")
+    upgrade_database(database)
+    engine = make_engine(database)
+    with session_scope(engine) as session:
+        save_resume_version(session, _resume("Jane Doe"))
+
+    config = Config("alembic.ini")
+    config.attributes["database"] = database
+    command.downgrade(config, "0006")
+    with engine.connect() as connection:
+        tables = {row[0] for row in connection.execute(text("SELECT name FROM sqlite_master"))}
+    engine.dispose()
+    assert "resume_versions" not in tables
+    assert "jobs" in tables

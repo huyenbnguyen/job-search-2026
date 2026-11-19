@@ -11,6 +11,8 @@
   re-scoring pass adds a row, so earlier labels stay for the consistency check.
 - `fit_predictions`: model fit scores (1-5), kept apart from human labels, each tied to
   the job, resume version, model, prompt, and rubric that produced it.
+- `resume_versions`: the text extracted from each distinct resume, never overwritten.
+  `text_hash` is the resume version that predictions record.
 
 `jobs_overview` shows the latest of each as `human_fit_score`, `human_would_apply`,
 and `ai_fit_score`. Labeling must never show model scores before the user scores a job.
@@ -114,4 +116,22 @@ class FitPrediction(Base):
     rubric_version: Mapped[str] = mapped_column(String(64))
     resume_version: Mapped[str] = mapped_column(String(64))
     run_id: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime]
+
+
+class ResumeVersion(Base):
+    """One distinct resume text. Loading the same text again, even renamed, adds nothing."""
+
+    __tablename__ = "resume_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # SHA-256 of `text`; the version that predictions record as `resume_version`.
+    text_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    text: Mapped[str] = mapped_column(Text)
+    # Only the file's name: the original file stays where the user keeps it.
+    source_filename: Mapped[str] = mapped_column(Text)
+    file_hash: Mapped[str] = mapped_column(String(64))
+    page_count: Mapped[int]
+    # The extractor and its version, since another extractor can produce different text.
+    parser: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime]
