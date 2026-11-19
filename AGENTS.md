@@ -90,6 +90,7 @@ Keep these current:
 - Create or upgrade the database: `uv run jobsearch db upgrade` (Alembic; new migration: `uv run alembic revision --autogenerate -m "..."`, then review it)
 - Import fetched jobs: `uv run jobsearch db import-jobs data/applied_jobs.jsonl`
 - Load your resume: `uv run jobsearch resume load docs/resume/<file>.pdf`; check the text with `uv run jobsearch resume show`
+- Keyword baseline scores: `uv run jobsearch score baseline` (shows scores only for jobs you've labeled)
 - Run evaluation: TBD
 
 Run tests, lint, and type checks before saying a change is done.

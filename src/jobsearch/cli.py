@@ -1,5 +1,6 @@
 """Command-line entry point. Keep commands thin; logic lives in services/."""
 
+import logging
 import uuid
 from collections import Counter
 from itertools import islice
@@ -11,11 +12,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import Engine, select
+from sqlalchemy.orm import Session
 
 from jobsearch.config import DatabaseConfig, load_config
 from jobsearch.database import make_engine, session_scope
 from jobsearch.models.job import CompanySource, FetchStatus, JobFetchRecord
-from jobsearch.models.tables import Job, ResumeVersion
+from jobsearch.models.tables import FitPrediction, HumanLabel, Job, ResumeVersion
 from jobsearch.observability.logging import configure_logging
 from jobsearch.services.ingestion.applied_jobs import fetch_jobs, read_job_urls, write_jsonl
 from jobsearch.services.ingestion.fetch import SafeFetcher
@@ -28,13 +30,17 @@ from jobsearch.services.migrations import (
     upgrade_database,
 )
 from jobsearch.services.profiles import ResumeParseError, parse_resume, save_resume_version
+from jobsearch.services.scoring.keyword_baseline import run_keyword_baseline
 
 app = typer.Typer(no_args_is_help=True)
 db_app = typer.Typer(no_args_is_help=True, help="Local SQLite database.")
 app.add_typer(db_app, name="db")
 resume_app = typer.Typer(no_args_is_help=True, help="Your resume, stored as versioned text.")
 app.add_typer(resume_app, name="resume")
+score_app = typer.Typer(no_args_is_help=True, help="Score jobs against your resume.")
+app.add_typer(score_app, name="score")
 console = Console()
+_log = logging.getLogger("jobsearch.cli")
 ConfigOption = Annotated[Path | None, typer.Option("--config", help="Config YAML")]
 
 
@@ -240,3 +246,105 @@ def resume_show(
         raise typer.Exit(1)
     # Plain output: resume text may contain [brackets] that Rich would read as markup.
     typer.echo(text)
+
+
+@score_app.command("baseline")
+def score_baseline(
+    resume_id: Annotated[
+        int | None, typer.Option("--resume", help="ID from `resume list`; the newest by default")
+    ] = None,
+    config_path: ConfigOption = None,
+) -> None:
+    """Score every job with a description by keyword overlap with your resume (no LLM)."""
+    config = load_config(config_path)
+    run_id = uuid.uuid4().hex
+    configure_logging(config.logging.file, run_id)
+    engine = _current_engine(config.database)
+    with session_scope(engine) as session:
+        query = select(ResumeVersion).order_by(ResumeVersion.id.desc()).limit(1)
+        if resume_id is not None:
+            query = select(ResumeVersion).where(ResumeVersion.id == resume_id)
+        resume = session.scalar(query)
+        if resume is None:
+            engine.dispose()
+            console.print("[red]No resume found. Load one with `jobsearch resume load <pdf>`.[/]")
+            raise typer.Exit(1)
+        summary = run_keyword_baseline(
+            session,
+            resume,
+            config.scoring.keyword_baseline,
+            config.scoring.rubric_version,
+            run_id,
+        )
+        rows = _labeled_baseline_rows(session, summary.prediction_ids)
+        resume_label = f"{resume.id} ({resume.text_hash[:12]})"
+    engine.dispose()
+    _log.info(
+        "keyword baseline run finished",
+        extra={
+            "resume_version": resume_label,
+            "jobs_scored": summary.jobs_scored,
+            "jobs_unchanged": summary.jobs_unchanged,
+            "jobs_without_skills": len(summary.jobs_without_skills),
+        },
+    )
+
+    console.print(
+        f"Run [bold]{run_id}[/], resume version {resume_label}: "
+        f"{summary.jobs_scored} jobs scored, "
+        f"{summary.jobs_unchanged} already scored with the same inputs (skipped)."
+    )
+    if summary.jobs_without_skills:
+        ids = ", ".join(map(str, summary.jobs_without_skills))
+        console.print(f"No known skills in the description, not scored: job_id {ids}")
+    if rows:
+        _print_baseline_table(rows)
+    hidden = summary.jobs_scored - len(rows)
+    if hidden:
+        console.print(
+            f"Scores for {hidden} jobs you haven't labeled are hidden. Label them first, "
+            "so the baseline can't influence your score."
+        )
+
+
+def _labeled_baseline_rows(session: Session, prediction_ids: list[int]) -> list[tuple[str, ...]]:
+    """This run's scores, for jobs the user has already labeled only."""
+    rows: list[tuple[str, ...]] = []
+    for prediction_id in prediction_ids:
+        prediction = session.get(FitPrediction, prediction_id)
+        assert prediction is not None
+        label = session.scalar(
+            select(HumanLabel)
+            .where(HumanLabel.job_id == prediction.job_id)
+            .order_by(HumanLabel.labeled_at.desc(), HumanLabel.id.desc())
+            .limit(1)
+        )
+        if label is None:
+            continue
+        job = session.get(Job, prediction.job_id)
+        assert job is not None
+        details = prediction.details or {}
+        rows.append(
+            (
+                str(job.id),
+                job.company or "",
+                job.title or "",
+                str(label.fit_score),
+                str(prediction.fit_score),
+                f"{details.get('matched_count', 0)}/{details.get('job_skill_count', 0)}",
+            )
+        )
+    return rows
+
+
+def _print_baseline_table(rows: list[tuple[str, ...]]) -> None:
+    table = Table(title="Keyword baseline on jobs you've labeled")
+    table.add_column("Job", justify="right")
+    table.add_column("Company", overflow="fold")
+    table.add_column("Title", overflow="fold")
+    table.add_column("You", justify="right")
+    table.add_column("Baseline", justify="right")
+    table.add_column("Skills matched", justify="right")
+    for row in rows:
+        table.add_row(*row)
+    console.print(table)

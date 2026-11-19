@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any, ClassVar
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -117,6 +118,9 @@ class FitPrediction(Base):
     resume_version: Mapped[str] = mapped_column(String(64))
     run_id: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime]
+    # How the score was reached, as JSON. For the keyword baseline: the matched and
+    # missing skills, their counts, and the threshold percents. Never resume text.
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
 class ResumeVersion(Base):

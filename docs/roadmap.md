@@ -56,7 +56,7 @@ The steps below are a proposed breakdown; each one is usable on its own.
 
 **1c. Compare models and prompts**
 - [ ] Adapters for the remaining candidate models
-- [ ] Non-LLM baseline (keyword/skill overlap mapped onto 1–5)
+- [x] Non-LLM baseline (keyword/skill overlap mapped onto 1–5): `jobsearch score baseline`
 - [ ] Experiment runner over models × prompt versions × jobs, with a repeated subset to measure run-to-run variance
 - [ ] Report: mean absolute error, within-one agreement, mean signed error, Spearman correlation, confusion matrix, variance, schema validity, fabricated-quote rate, cost, latency, and bootstrap confidence intervals
 - [ ] Every experiment records model ID, prompt, rubric and dataset versions

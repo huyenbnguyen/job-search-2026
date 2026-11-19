@@ -5,7 +5,15 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveFloat,
+    PositiveInt,
+    StrictInt,
+    field_validator,
+)
 
 DEFAULT_CONFIG_PATH = Path("config/config.yaml")
 
@@ -68,10 +76,33 @@ class DatabaseConfig(_Section):
         return value.expanduser()
 
 
+class KeywordBaselineConfig(_Section):
+    # A file in prompts/job_matching/, without the .yaml extension.
+    vocabulary: str = "keyword_skills_v1"
+    # Whole percentages of the job's skills found in the resume. Reaching each one adds a
+    # point to a base score of 1, so four ascending thresholds give the integer scores 1-5.
+    # Compared in integer arithmetic: no floating point anywhere in the score.
+    threshold_percents: tuple[StrictInt, StrictInt, StrictInt, StrictInt] = (20, 40, 60, 80)
+
+    @field_validator("threshold_percents")
+    @classmethod
+    def _ascending_percents(cls, value: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        if list(value) != sorted(set(value)) or not all(1 <= t <= 100 for t in value):
+            raise ValueError("threshold_percents must be four distinct ascending integers, 1-100")
+        return value
+
+
+class ScoringConfig(_Section):
+    # The rubric that scores are compared on: a file in prompts/job_matching/.
+    rubric_version: str = "rubric_v1"
+    keyword_baseline: KeywordBaselineConfig = Field(default_factory=KeywordBaselineConfig)
+
+
 class AppConfig(_Section):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    scoring: ScoringConfig = Field(default_factory=ScoringConfig)
 
 
 def load_config(path: Path | None = None) -> AppConfig:
