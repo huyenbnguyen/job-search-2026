@@ -6,14 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-Planning only. There is no code yet, and no build, lint, or test tooling. `data/` and `README.md` are empty. Don't invent commands. Once `pyproject.toml` and the rest of the tooling exist, fill in the Commands section of `AGENTS.md`, including how to run a single test.
+Phase 1a is in progress. `src/jobsearch/` has typed config, an SSRF-safe fetcher, and job source adapters, plus the `fetch-applied` command, which stages fetched jobs as JSONL (`JobFetchRecord`). `data/` holds personal data and is gitignored.
 
 ## Where the design lives
 
-- `docs/scoping.md` is the source of truth. `AGENTS.md` calls it `scoping.md`. When another doc or a skill disagrees with it, `scoping.md` wins, and you should flag the conflict.
+- `docs/scoping.md` is the source of truth. When another doc or a skill disagrees with it, `scoping.md` wins, and you should flag the conflict.
 - `docs/roadmap.md` has seven phases, each with "Decide before starting" items and a checklist for when it's done. Check those decisions before starting a phase. If one is still open, ask the user.
 - `docs/tech-stack-decisions.md` is the decision log for tooling: what was chosen, what was rejected, and when to revisit. Add new decisions there in the same format.
-- The `job-ingestion` skill listed in `AGENTS.md` doesn't exist yet under `.claude/skills/`. Apply the ingestion rules from `AGENTS.md` and `scoping.md` directly.
+- Source adapters live in `src/jobsearch/services/ingestion/sources/`. They're tried in the order `default_adapters()` lists them. `career_page` matches any URL, so it goes last. When a career page embeds a Greenhouse or Ashby board, it hands off to that board's adapter.
 
 ## Phase 1 scoring design (spans several docs)
 

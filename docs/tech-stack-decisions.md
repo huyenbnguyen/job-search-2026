@@ -22,6 +22,9 @@ Why each tool in the job search tool was chosen, what was considered instead, an
 | Scheduling | cron or systemd timer, explicit timezone | Decided |
 | CI | GitHub Actions or equivalent | Proposed |
 | Logging and metrics | Structured JSON logs to a local file; run metrics in the database | Decided |
+| Job-page access | Official job-board APIs first, then robots.txt-checked JSON-LD reads; no LinkedIn | Decided |
+| HTTP client | httpx | Proposed |
+| Python tooling | uv, ruff, mypy (strict) | Proposed |
 | Later API and UI (Phase 6) | FastAPI + React/TypeScript, localhost only | Proposed |
 
 ---
@@ -219,6 +222,37 @@ Either can be revisited if the tool is ever hosted, as long as personal data sta
 **Alternatives considered:** none recorded in planning for the API or frontend frameworks. Building the UI before the CLI was rejected; see the CLI section.
 
 **Note:** if the tool is ever hosted or shared, authentication and per-user authorization must come first.
+
+---
+
+## Job-page fetching: official APIs first, no LinkedIn
+
+**Decision:** fetch jobs with httpx through an SSRF-safe wrapper. Greenhouse, Lever, and Ashby links go through their public job-board APIs. Company career pages get one GET, which reads the schema.org JobPosting data the page embeds, and only when robots.txt allows it. The Lever and Ashby APIs don't return a company name, so the company is read from the job's hosted page (its JobPosting `hiringOrganization`), also subject to robots.txt. A career page that embeds a Greenhouse or Ashby board (`gh_jid` or `ashby_jid` in its URL) is routed to that board's API. LinkedIn links are never fetched. Every link gets a status, and links that couldn't be fetched are left for the paste-text fallback. *Status: source access decided by the user in Phase 1a; httpx proposed.*
+
+**Why:**
+- The job-board APIs are published for public read access, return structured JSON, and say plainly when a job is closed (404, or the job missing from its board).
+- JSON-LD is data a site chooses to publish for machines. Reading it with one request per page, a per-host delay, and robots.txt checks keeps access polite.
+- LinkedIn's User Agreement prohibits automated access.
+- httpx gives timeouts, streaming (needed for the response-size limit), manual redirects (each hop is re-checked against SSRF), and a mock transport for tests.
+
+**Alternatives considered:**
+- *Job-board APIs only:* safest, but it covers about a third of the applied-job links.
+- *Fetching LinkedIn as well:* rejected because of LinkedIn's terms, and its pages mostly need a login anyway.
+- *A headless browser for JavaScript-only career pages:* not adopted. It adds a heavy dependency, and it's a less clear-cut use of a site than reading its published data. Revisit if the paste-text fallback proves too slow.
+- *Unofficial endpoints, such as Workday's internal JSON:* not used, because their terms are unclear.
+
+**Company names:** a closed or unreadable job still gets a company, along with its source:
+1. The job's own data.
+2. The company's job board: the Greenhouse board API name, a Lever board page's title, or the organization in an Ashby board page's embedded data.
+3. A slug taken from the URL: the ATS tenant or the site's domain, recorded as a hint.
+
+Users can set a company by hand, and an automatic source never replaces it.
+
+*Alternative rejected:* using a career page's `og:site_name` or title. Checked against the real links, it named the wrong company: it gives the ATS vendor ("Rippling" on another company's Rippling-hosted job), a parent company's name on a subsidiary's job, or the name of a jobs site rather than the company.
+
+**Output:** a JSONL staging file of `JobFetchRecord`s. Each record has a stable `job_key` for dedupe, a `description_hash` to detect changed text, and its source URL and retrieval time.
+
+**Revisit when:** a new source is added (check its terms first), or the share of `no_details` records makes the manual fallback a burden.
 
 ---
 
