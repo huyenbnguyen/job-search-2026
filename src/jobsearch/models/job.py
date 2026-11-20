@@ -75,7 +75,7 @@ class JobFetchRecord(BaseModel):
     def description_hash(self) -> str | None:
         if self.description_text is None:
             return None
-        return hashlib.sha256(self.description_text.encode("utf-8")).hexdigest()
+        return _text_hash(self.description_text)
 
     @model_validator(mode="before")
     @classmethod
@@ -88,7 +88,7 @@ class JobFetchRecord(BaseModel):
             data = dict(data)
             stored = data.pop("description_hash")
             text = data.get("description_text")
-            expected = hashlib.sha256(text.encode("utf-8")).hexdigest() if text else None
+            expected = _text_hash(text) if isinstance(text, str) else None
             if stored != expected:
                 raise ValueError("description_hash doesn't match description_text")
         return data
@@ -100,6 +100,10 @@ class JobFetchRecord(BaseModel):
         if (self.company is None) != (self.company_source is None):
             raise ValueError("company and company_source must be set together")
         return self
+
+
+def _text_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def utc_now() -> datetime:

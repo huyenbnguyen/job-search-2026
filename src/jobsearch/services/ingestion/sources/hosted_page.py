@@ -7,12 +7,12 @@ keeps everything the API returned and only the company stays empty.
 """
 
 import logging
-from urllib.robotparser import RobotFileParser
 
 import httpx
 
-from jobsearch.services.ingestion.fetch import FetchError
+from jobsearch.services.ingestion.fetch import FetchError, FetchResult, NotPermittedError
 from jobsearch.services.ingestion.html_utils import find_job_postings
+from jobsearch.services.ingestion.robots import RobotsRules
 from jobsearch.services.ingestion.sources.base import FetchContext, text_or_none
 
 logger = logging.getLogger(__name__)
@@ -23,28 +23,40 @@ class RobotsPolicy:
 
     def __init__(self, *, enabled: bool = True) -> None:
         self._enabled = enabled
-        self._parsers: dict[str, RobotFileParser] = {}
+        self._rules: dict[str, RobotsRules] = {}
 
     def allows(self, url: httpx.URL, ctx: FetchContext) -> bool:
         if not self._enabled:
             return True
         origin = f"{url.scheme}://{url.netloc.decode('ascii')}"
-        parser = self._parsers.get(origin)
-        if parser is None:
-            parser = RobotFileParser()
+        rules = self._rules.get(origin)
+        if rules is None:
             try:
                 result = ctx.fetcher.get(f"{origin}/robots.txt", accept="text/plain")
             except FetchError:
                 result = None
             if result is not None and result.ok:
-                parser.parse(result.text.splitlines())
+                rules = RobotsRules.parse(result.text)
             elif result is not None and 400 <= result.status_code < 500:
-                parser.parse([])  # RFC 9309: no robots.txt means no restrictions.
+                rules = RobotsRules.allow_all()  # RFC 9309: no robots.txt, no restrictions.
             else:
                 # RFC 9309: an unreachable robots.txt means assume everything is disallowed.
-                parser.parse(["User-agent: *", "Disallow: /"])
-            self._parsers[origin] = parser
-        return parser.can_fetch(ctx.user_agent, str(url))
+                rules = RobotsRules.disallow_all()
+            self._rules[origin] = rules
+        return rules.allows(ctx.user_agent, url)
+
+    def require(self, url: httpx.URL, ctx: FetchContext) -> None:
+        """Raise NotPermittedError unless robots.txt allows `url`. A SafeFetcher hop check."""
+        if not self.allows(url, ctx):
+            raise NotPermittedError("robots.txt disallows automated access to this page")
+
+    def get_page(self, url: str, ctx: FetchContext) -> FetchResult:
+        """GET an HTML page, checking robots.txt for it and for every redirect it follows."""
+        return ctx.fetcher.get(
+            url,
+            accept="text/html,application/xhtml+xml",
+            check_hop=lambda hop: self.require(hop, ctx),
+        )
 
 
 class HostedPageReader:
@@ -56,10 +68,7 @@ class HostedPageReader:
         if not page_url:
             return None
         try:
-            url = httpx.URL(page_url)
-            if not self._robots.allows(url, ctx):
-                return None
-            result = ctx.fetcher.get(str(url), accept="text/html,application/xhtml+xml")
+            result = self._robots.get_page(str(httpx.URL(page_url)), ctx)
         except (FetchError, httpx.InvalidURL) as exc:
             logger.info(
                 "hosted page unavailable",

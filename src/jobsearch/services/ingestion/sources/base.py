@@ -74,8 +74,9 @@ def normalize_url(url: httpx.URL) -> str:
         for key, value in url.params.multi_items()
         if key.lower() not in _TRACKING_PARAMS and not key.lower().startswith("utm_")
     )
-    path = url.path.rstrip("/") or "/"
-    normalized = url.copy_with(path=path, fragment=None, query=None)
+    # The encoded path, so an encoded separator (%2F) stays distinct from a literal "/".
+    raw_path = url.raw_path.split(b"?", 1)[0].rstrip(b"/") or b"/"
+    normalized = url.copy_with(raw_path=raw_path, fragment=None)
     if params:
         normalized = normalized.copy_with(params=params)
     return str(normalized)

@@ -6,6 +6,7 @@ import also knows which jobs need the paste-text fallback.
 """
 
 import csv
+import hashlib
 import logging
 import os
 import tempfile
@@ -16,7 +17,7 @@ from pathlib import Path
 import httpx
 
 from jobsearch.models.job import CompanySource, FetchStatus, JobFetchRecord
-from jobsearch.services.ingestion.fetch import FetchError
+from jobsearch.services.ingestion.fetch import FetchError, NotPermittedError
 from jobsearch.services.ingestion.sources import FetchContext, SourceAdapter
 from jobsearch.services.ingestion.sources.company_from_url import company_from_url
 
@@ -60,19 +61,22 @@ def _fetch_one(
     try:
         record = adapter.fetch(source_url, url, ctx)
         error_category = None
+    except NotPermittedError as exc:  # For example, a redirect to LinkedIn.
+        record = _failed(ctx, source_url, key, adapter.name, str(exc), FetchStatus.NOT_PERMITTED)
+        error_category = exc.category
     except FetchError as exc:
         record = _failed(ctx, source_url, key, adapter.name, str(exc))
         error_category = exc.category
     except Exception as exc:  # One bad response must not end the run.
         record = _failed(ctx, source_url, key, adapter.name, f"unexpected {type(exc).__name__}")
         error_category = "unexpected_error"
-        logger.exception("unexpected error while fetching", extra={"job_key": key})
+        logger.exception("unexpected error while fetching", extra={"job_ref": _log_ref(key)})
     if record.company is None and (hint := company_from_url(url)):
         record = record.model_copy(update={"company": hint, "company_source": CompanySource.URL})
     logger.info(
         "job processed",
         extra={
-            "job_key": record.job_key,
+            "job_ref": _log_ref(record.job_key),
             "source": record.source,
             "status": record.status.value,
             "company_source": record.company_source,
@@ -83,15 +87,25 @@ def _fetch_one(
     return record
 
 
+def _log_ref(job_key: str) -> str:
+    """A short, non-reversible reference to a job for logs. Keys can contain full URLs."""
+    return hashlib.sha256(job_key.encode("utf-8")).hexdigest()[:16]
+
+
 def _failed(
-    ctx: FetchContext, source_url: str, key: str, source: str, detail: str
+    ctx: FetchContext,
+    source_url: str,
+    key: str,
+    source: str,
+    detail: str,
+    status: FetchStatus = FetchStatus.FAILED,
 ) -> JobFetchRecord:
     return JobFetchRecord(
         run_id=ctx.run_id,
         source_url=source_url,
         job_key=key,
         source=source,
-        status=FetchStatus.FAILED,
+        status=status,
         retrieved_at=ctx.now(),
         detail=detail,
     )

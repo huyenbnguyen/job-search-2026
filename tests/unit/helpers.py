@@ -46,11 +46,22 @@ class FakeNetwork:
         key = str(request.url.copy_with(query=None))
         route = self.routes.get(key)
         if route is None:
-            return httpx.Response(404)
-        return route(request) if callable(route) else route
+            return streamed(httpx.Response(404))
+        return streamed(route(request) if callable(route) else route)
 
     def requested(self, url: str) -> int:
         return sum(1 for r in self.requests if str(r.url.copy_with(query=None)) == url)
+
+
+def streamed(response: httpx.Response) -> httpx.Response:
+    """A fresh, unread copy of `response`, as a real transport returns it.
+
+    The fetcher reads the raw stream, and httpx pre-reads a Response built from bytes.
+    The body is copied decoded, so build encoded test responses with `stream=` instead.
+    """
+    return httpx.Response(
+        response.status_code, headers=response.headers, stream=httpx.ByteStream(response.content)
+    )
 
 
 def make_fetcher(

@@ -1,7 +1,9 @@
 import json
+import logging
 from pathlib import Path
 
 import httpx
+import pytest
 
 from jobsearch.models.job import CompanySource, FetchStatus, JobFetchRecord
 from jobsearch.services.ingestion.applied_jobs import fetch_jobs, read_job_urls, write_jsonl
@@ -130,3 +132,27 @@ def test_records_written_before_company_source_load_as_job_posting() -> None:
     data = json.loads(collect([GH_URL], network)[0].model_dump_json())
     del data["company_source"]
     assert JobFetchRecord.model_validate(data).company_source is CompanySource.JOB_POSTING
+
+
+def test_logs_never_contain_the_raw_job_key(caplog: pytest.LogCaptureFixture) -> None:
+    url = "https://careers.example.com/jobs/42?team=eng"
+    with caplog.at_level(logging.INFO, logger="jobsearch"):
+        [record] = collect([url], FakeNetwork({}))
+    assert record.job_key == "page:https://careers.example.com/jobs/42?team=eng"
+    logged = [r for r in caplog.records if r.getMessage() == "job processed"]
+    assert len(logged) == 1
+    assert len(getattr(logged[0], "job_ref", "")) == 16
+    assert all("careers.example.com" not in str(vars(r)) for r in caplog.records)
+
+
+def test_redirect_to_linkedin_is_recorded_as_not_permitted() -> None:
+    network = FakeNetwork(
+        {
+            GH_API: httpx.Response(
+                302, headers={"location": "https://www.linkedin.com/jobs/view/4000000001/"}
+            )
+        }
+    )
+    [record] = collect([GH_URL], network)
+    assert record.status is FetchStatus.NOT_PERMITTED
+    assert all(r.url.host != "www.linkedin.com" for r in network.requests)

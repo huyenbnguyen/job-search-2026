@@ -1,11 +1,21 @@
+import gzip
+import zlib
+from collections.abc import Iterator
+
 import httpx
 import pytest
 
+from jobsearch.config import FetchConfig
 from jobsearch.services.ingestion.fetch import (
     BlockedURLError,
+    DeadlineExceededError,
+    FetchError,
     NetworkError,
+    NotPermittedError,
     ResponseTooLargeError,
+    SafeFetcher,
     TooManyRedirectsError,
+    _CappedDecoder,
     check_url_allowed,
 )
 from tests.unit.helpers import PUBLIC_IP, FakeNetwork, make_fetcher, public_resolver
@@ -169,3 +179,125 @@ def test_sends_configured_user_agent() -> None:
     with make_fetcher(network, user_agent="custom-agent/1.0") as fetcher:
         fetcher.get("https://jobs.example.com/1")
     assert network.requests[0].headers["user-agent"] == "custom-agent/1.0"
+
+
+def encoded(body: bytes, encoding: str) -> httpx.Response:
+    # Built with stream= so the test fake passes the encoded bytes through unchanged.
+    return httpx.Response(
+        200, headers={"content-encoding": encoding}, stream=httpx.ByteStream(body)
+    )
+
+
+def test_requests_only_encodings_it_can_cap() -> None:
+    network = FakeNetwork({"https://jobs.example.com/1": httpx.Response(200)})
+    with make_fetcher(network) as fetcher:
+        fetcher.get("https://jobs.example.com/1")
+    assert network.requests[0].headers["accept-encoding"] == "gzip, deflate"
+
+
+@pytest.mark.parametrize(
+    "body_and_encoding",
+    [
+        (gzip.compress(b"<p>job</p>" * 5), "gzip"),
+        (zlib.compress(b"<p>job</p>" * 5), "deflate"),
+        (zlib.compress(b"<p>job</p>" * 5)[2:-4], "deflate"),  # raw deflate, no zlib header
+    ],
+    ids=["gzip", "deflate", "raw_deflate"],
+)
+def test_decodes_compressed_responses_within_the_limit(
+    body_and_encoding: tuple[bytes, str],
+) -> None:
+    body, encoding = body_and_encoding
+    with make_fetcher(lambda request: encoded(body, encoding), max_response_bytes=50) as fetcher:
+        assert fetcher.get("https://jobs.example.com/1").body == b"<p>job</p>" * 5
+
+
+def test_compressed_response_over_the_limit_is_rejected() -> None:
+    bomb = gzip.compress(b"\0" * 10_000_000)  # about 10 KB on the wire
+    with (
+        make_fetcher(lambda request: encoded(bomb, "gzip"), max_response_bytes=1000) as fetcher,
+        pytest.raises(ResponseTooLargeError),
+    ):
+        fetcher.get("https://jobs.example.com/1")
+
+
+def test_decoder_never_returns_more_than_asked() -> None:
+    decoder = _CappedDecoder("gzip")
+    assert len(decoder.decode(gzip.compress(b"\0" * 1_000_000), 101)) == 101
+
+
+def test_unsupported_content_encoding_is_an_error() -> None:
+    with (
+        make_fetcher(lambda request: encoded(b"x", "br")) as fetcher,
+        pytest.raises(FetchError, match="unsupported content-encoding"),
+    ):
+        fetcher.get("https://jobs.example.com/1")
+
+
+def test_slow_body_hits_the_total_deadline() -> None:
+    now = [0.0]
+
+    def clock() -> float:
+        return now[0]
+
+    def drip() -> Iterator[bytes]:
+        for _ in range(100):
+            now[0] += 1.0  # each chunk arrives within httpx's inactivity timeout
+            yield b"x"
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=_Iter(drip()))
+
+    fetcher = SafeFetcher(
+        FetchConfig(timeout_seconds=10, max_retries=0, per_host_delay_seconds=0),
+        transport=httpx.MockTransport(respond),
+        resolver=public_resolver,
+        sleep=lambda seconds: None,
+        clock=clock,
+    )
+    with fetcher, pytest.raises(DeadlineExceededError):
+        fetcher.get("https://jobs.example.com/slow")
+    assert now[0] <= 11
+
+
+class _Iter(httpx.SyncByteStream):
+    def __init__(self, chunks: Iterator[bytes]) -> None:
+        self._chunks = chunks
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield from self._chunks
+
+
+def test_redirect_to_linkedin_is_not_followed() -> None:
+    network = FakeNetwork(
+        {
+            "https://jobs.example.com/1": httpx.Response(
+                302, headers={"location": "https://www.linkedin.com/jobs/view/4000000001/"}
+            ),
+        }
+    )
+    with make_fetcher(network) as fetcher, pytest.raises(NotPermittedError):
+        fetcher.get("https://jobs.example.com/1")
+    assert [str(r.url) for r in network.requests] == ["https://jobs.example.com/1"]
+
+
+def test_hop_check_runs_before_every_hop() -> None:
+    network = FakeNetwork(
+        {
+            "https://a.example.com/1": httpx.Response(
+                302, headers={"location": "https://b.example.com/2"}
+            ),
+            "https://b.example.com/2": httpx.Response(200, content=b"ok"),
+        }
+    )
+    checked: list[str] = []
+
+    def check(url: httpx.URL) -> None:
+        checked.append(str(url))
+        if url.host == "b.example.com":
+            raise NotPermittedError("not this one")
+
+    with make_fetcher(network) as fetcher, pytest.raises(NotPermittedError):
+        fetcher.get("https://a.example.com/1", check_hop=check)
+    assert checked == ["https://a.example.com/1", "https://b.example.com/2"]
+    assert network.requested("https://b.example.com/2") == 0

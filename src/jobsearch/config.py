@@ -1,11 +1,37 @@
 """Typed application config, loaded from YAML. See config/config.example.yaml."""
 
+from collections.abc import Hashable
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt
 
 DEFAULT_CONFIG_PATH = Path("config/config.yaml")
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """SafeLoader that rejects a key repeated in the same mapping, at any depth.
+
+    Plain safe_load keeps the last value silently, so a repeated section would hide
+    the settings written above it.
+    """
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        seen: set[Any] = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if not isinstance(key, Hashable):
+                continue  # SafeLoader reports unhashable keys itself.
+            if key in seen:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"found duplicate key {key!r}",
+                    key_node.start_mark,
+                )
+            seen.add(key)
+        return super().construct_mapping(node, deep=deep)
 
 
 class _Section(BaseModel):
@@ -42,5 +68,5 @@ def load_config(path: Path | None = None) -> AppConfig:
         if not DEFAULT_CONFIG_PATH.exists():
             return AppConfig()
         path = DEFAULT_CONFIG_PATH
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    raw = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader) or {}
     return AppConfig.model_validate(raw)

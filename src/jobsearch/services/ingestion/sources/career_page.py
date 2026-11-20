@@ -2,9 +2,10 @@
 
 In order, the adapter:
 1. skips the page if the site's robots.txt disallows it (configurable);
-2. reads a schema.org JobPosting embedded as JSON-LD;
-3. otherwise, when the URL carries a `gh_jid` or `ashby_jid` and the page names its
-   Greenhouse board or Ashby organization, uses that job board's public API;
+2. when the URL carries a `gh_jid` or `ashby_jid` and the page names its Greenhouse
+   board or Ashby organization, uses that job board's public API for that exact job;
+3. otherwise reads a schema.org JobPosting embedded as JSON-LD: the only complete one
+   on the page, or among several, the one whose `url` is this page;
 4. otherwise, when the URL carries a `gh_jid`, tries the company name from the URL as
    the board. That's a guess, so only a successful lookup counts: a miss says nothing
    about whether the job is closed.
@@ -14,10 +15,12 @@ and are left for the paste-text fallback.
 """
 
 import re
+from typing import Any
 
 import httpx
 
 from jobsearch.models.job import FetchStatus, JobFetchRecord
+from jobsearch.services.ingestion.fetch import NotPermittedError
 from jobsearch.services.ingestion.html_utils import find_job_postings, html_to_text
 from jobsearch.services.ingestion.sources.ashby import AshbyAdapter
 from jobsearch.services.ingestion.sources.base import (
@@ -63,13 +66,14 @@ class CareerPageAdapter(SourceAdapter):
 
     def fetch(self, source_url: str, url: httpx.URL, ctx: FetchContext) -> JobFetchRecord:
         key = self.job_key(url)
-        if not self._robots.allows(url, ctx):
+        try:
+            # robots.txt is checked for the page and for every redirect it follows.
+            result = self._robots.get_page(str(url), ctx)
+        except NotPermittedError as exc:
             return self.record(
                 ctx, source_url=source_url, job_key=key, status=FetchStatus.NOT_PERMITTED,
-                detail="robots.txt disallows automated access to this page",
+                detail=str(exc),
             )  # fmt: skip
-
-        result = ctx.fetcher.get(str(url), accept="text/html,application/xhtml+xml")
         if result.status_code in (404, 410):
             return self.record(
                 ctx, source_url=source_url, job_key=key, status=FetchStatus.UNAVAILABLE,
@@ -87,27 +91,27 @@ class CareerPageAdapter(SourceAdapter):
             )  # fmt: skip
 
         page = result.text
-        for posting in find_job_postings(page):
-            title = text_or_none(posting.get("title"))
-            description = text_or_none(posting.get("description"))
-            if title and description:
-                return self.record(
-                    ctx,
-                    source_url=source_url,
-                    job_key=key,
-                    status=FetchStatus.FETCHED,
-                    title=title,
-                    company=organization_name(posting.get("hiringOrganization")),
-                    description_text=html_to_text(description),
-                    posting_url=text_or_none(posting.get("url")) or result.url,
-                )
-
+        # A board job ID names the exact job, so ask that board first: the page's JSON-LD
+        # may describe a different job, for example on a page listing several.
         gh_jid = url.params.get("gh_jid", "")
         if gh_jid.isdigit() and (board := _first_match(_GREENHOUSE_BOARD, page)):
             return self._greenhouse.fetch_job(board, gh_jid, source_url=source_url, ctx=ctx)
         ashby_jid = url.params.get("ashby_jid", "")
         if _UUID.match(ashby_jid) and (org := _first_match(_ASHBY_ORG, page)):
             return self._ashby.fetch_job(org, ashby_jid, source_url=source_url, ctx=ctx)
+
+        if posting := _requested_posting(find_job_postings(page), url, result.url):
+            return self.record(
+                ctx,
+                source_url=source_url,
+                job_key=key,
+                status=FetchStatus.FETCHED,
+                title=text_or_none(posting.get("title")),
+                company=organization_name(posting.get("hiringOrganization")),
+                description_text=html_to_text(text_or_none(posting.get("description")) or ""),
+                posting_url=text_or_none(posting.get("url")) or result.url,
+            )
+
         if gh_jid.isdigit() and (guess := company_from_url(url)):
             found = self._greenhouse.fetch_job(guess, gh_jid, source_url=source_url, ctx=ctx)
             if found.status is FetchStatus.FETCHED:
@@ -117,6 +121,30 @@ class CareerPageAdapter(SourceAdapter):
             ctx, source_url=source_url, job_key=key, status=FetchStatus.NO_DETAILS,
             detail="no machine-readable job data; the page may need JavaScript",
         )  # fmt: skip
+
+
+def _requested_posting(
+    postings: list[dict[str, Any]], url: httpx.URL, final_url: str
+) -> dict[str, Any] | None:
+    """The page's complete JobPosting for the requested job, or None.
+
+    A single complete posting is taken as the page's job. With several, only one whose
+    `url` is the requested or final page counts; otherwise the page is a listing.
+    """
+    complete = [
+        p for p in postings if text_or_none(p.get("title")) and text_or_none(p.get("description"))
+    ]
+    if len(complete) == 1:
+        return complete[0]
+    wanted = {normalize_url(url), normalize_url(httpx.URL(final_url))}
+    for posting in complete:
+        posting_url = text_or_none(posting.get("url"))
+        try:
+            if posting_url and normalize_url(httpx.URL(posting_url)) in wanted:
+                return posting
+        except httpx.InvalidURL:
+            continue
+    return None
 
 
 def _first_match(patterns: tuple[re.Pattern[str], ...], text: str) -> str | None:

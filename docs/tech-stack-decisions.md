@@ -250,6 +250,10 @@ Users can set a company by hand, and an automatic source never replaces it.
 
 *Alternative rejected:* using a career page's `og:site_name` or title. Checked against the real links, it named the wrong company: it gives the ATS vendor ("Rippling" on another company's Rippling-hosted job), a parent company's name on a subsidiary's job, or the name of a jobs site rather than the company.
 
+**robots.txt matching:** a small in-house matcher (`services/ingestion/robots.py`) that follows RFC 9309: `*` and `$` wildcards, longest match wins, and `allow` wins a tie. It's checked on every redirect hop too, and a hop to LinkedIn is refused.
+- *Alternative rejected:* the standard library's `RobotFileParser`. It ignores wildcards and applies the first matching rule, so it allowed pages the site had disallowed.
+- *Alternative not adopted:* the `protego` library. It's correct, but it would be a new dependency for about 60 lines of matching that the tests cover.
+
 **Output:** a JSONL staging file of `JobFetchRecord`s. Each record has a stable `job_key` for dedupe, a `description_hash` to detect changed text, and its source URL and retrieval time.
 
 **Revisit when:** a new source is added (check its terms first), or the share of `no_details` records makes the manual fallback a burden.

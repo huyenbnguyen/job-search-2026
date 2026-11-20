@@ -9,16 +9,18 @@ import re
 import httpx
 
 from jobsearch.models.job import FetchStatus, JobFetchRecord
+from jobsearch.services.ingestion.fetch import is_linkedin_host
 from jobsearch.services.ingestion.sources.base import FetchContext, SourceAdapter, normalize_url
 
-_JOB_VIEW = re.compile(r"/jobs/view/(?:[^/]*?-)?(\d+)")
+# The ID is the last hyphen-separated part of the slug: /jobs/view/<slug>-<id>/ or /jobs/view/<id>.
+_JOB_VIEW = re.compile(r"/jobs/view/(?:[^/]*-)?(\d+)(?:/|$)")
 
 
 class LinkedInAdapter(SourceAdapter):
     name = "linkedin"
 
     def matches(self, url: httpx.URL) -> bool:
-        return url.host == "linkedin.com" or url.host.endswith(".linkedin.com")
+        return is_linkedin_host(url.host)
 
     def job_key(self, url: httpx.URL) -> str:
         match = _JOB_VIEW.search(url.path)

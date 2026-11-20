@@ -67,6 +67,22 @@ def run(url: str, network: FakeNetwork) -> tuple[SourceAdapter, JobFetchRecord]:
             "linkedin:4000000001",
         ),
         (
+            "https://www.linkedin.com/jobs/view/senior-engineer-2-4000000002/",
+            "linkedin",
+            "linkedin:4000000002",
+        ),
+        (
+            "https://www.linkedin.com/jobs/view/4000000003/apply/",
+            "linkedin",
+            "linkedin:4000000003",
+        ),
+        (
+            "https://www.linkedin.com/jobs/view/backend-engineer-4000000004",
+            "linkedin",
+            "linkedin:4000000004",
+        ),
+        ("https://lnkd.in/abc123", "linkedin", "page:https://lnkd.in/abc123"),
+        (
             "https://careers.example.com/jobs/42?utm_source=li&team=eng#apply",
             "career_page",
             "page:https://careers.example.com/jobs/42?team=eng",
@@ -81,6 +97,13 @@ def test_routing_and_stable_keys(url: str, source: str, key: str) -> None:
 def test_normalize_url_drops_tracking_and_sorts_query() -> None:
     url = httpx.URL("HTTPS://Careers.Example.com/job/7/?b=2&utm_medium=x&a=1&trk=y")
     assert normalize_url(url) == "https://careers.example.com/job/7?a=1&b=2"
+
+
+def test_normalize_url_keeps_encoded_slashes_distinct() -> None:
+    encoded = normalize_url(httpx.URL("https://careers.example.com/teams/a%2Fb/"))
+    literal = normalize_url(httpx.URL("https://careers.example.com/teams/a/b/"))
+    assert encoded == "https://careers.example.com/teams/a%2Fb"
+    assert literal == "https://careers.example.com/teams/a/b"
 
 
 def test_greenhouse_fetched() -> None:
@@ -413,3 +436,89 @@ def test_board_name_is_looked_up_once_per_board() -> None:
             url = f"https://job-boards.greenhouse.io/examplecorp/jobs/{job_id}"
             adapter.fetch(url, httpx.URL(url), ctx)
     assert network.requested(board_api) == 1
+
+
+def _json_ld(*postings: dict[str, object]) -> httpx.Response:
+    scripts = "".join(
+        f'<script type="application/ld+json">{json.dumps(p)}</script>' for p in postings
+    )
+    return html_response(scripts)
+
+
+def _posting(title: str, url: str) -> dict[str, object]:
+    return {"@type": "JobPosting", "title": title, "description": f"<p>{title}.</p>", "url": url}
+
+
+def test_career_page_listing_several_jobs_takes_only_the_requested_one() -> None:
+    page = _json_ld(
+        _posting("Other Job", "https://careers.example.com/jobs/41"),
+        _posting("Wanted Job", "https://careers.example.com/jobs/42/"),
+    )
+    network = FakeNetwork(
+        {"https://careers.example.com/robots.txt": ROBOTS_ALLOW,
+         "https://careers.example.com/jobs/42": page}
+    )  # fmt: skip
+    _, record = run("https://careers.example.com/jobs/42", network)
+    assert (record.status, record.title) == (FetchStatus.FETCHED, "Wanted Job")
+
+
+def test_career_page_listing_without_the_requested_job_has_no_details() -> None:
+    page = _json_ld(
+        _posting("Job A", "https://careers.example.com/jobs/1"),
+        _posting("Job B", "https://careers.example.com/jobs/2"),
+    )
+    network = FakeNetwork(
+        {"https://careers.example.com/robots.txt": ROBOTS_ALLOW,
+         "https://careers.example.com/jobs": page}
+    )  # fmt: skip
+    _, record = run("https://careers.example.com/jobs", network)
+    assert record.status is FetchStatus.NO_DETAILS
+
+
+def test_career_page_board_id_wins_over_unrelated_json_ld() -> None:
+    page = _json_ld(_posting("Unrelated Job", "https://careers.example.com/jobs/9"))
+    page = html_response(
+        page.text + '<script src="https://boards.greenhouse.io/embed/job_board/js?for=examplecorp">'
+        "</script>"
+    )
+    network = FakeNetwork(
+        {
+            "https://careers.example.com/robots.txt": ROBOTS_ALLOW,
+            "https://careers.example.com/open-roles": page,
+            GH_API: json_response({"title": "SRE", "content": "&lt;p&gt;Keep it up.&lt;/p&gt;"}),
+        }
+    )
+    _, record = run("https://careers.example.com/open-roles?gh_jid=1234567", network)
+    assert (record.job_key, record.title) == ("greenhouse:examplecorp:1234567", "SRE")
+
+
+def test_career_page_redirect_is_checked_against_the_new_origins_robots_txt() -> None:
+    network = FakeNetwork(
+        {
+            "https://careers.example.com/robots.txt": ROBOTS_ALLOW,
+            "https://careers.example.com/jobs/42": httpx.Response(
+                302, headers={"location": "https://jobs.example.org/42"}
+            ),
+            "https://jobs.example.org/robots.txt": httpx.Response(
+                200, content=b"User-agent: *\nDisallow: /\n"
+            ),
+            "https://jobs.example.org/42": html_response("<p>job</p>"),
+        }
+    )
+    _, record = run("https://careers.example.com/jobs/42", network)
+    assert record.status is FetchStatus.NOT_PERMITTED
+    assert network.requested("https://jobs.example.org/42") == 0
+
+
+def test_career_page_robots_txt_wildcards_are_honored() -> None:
+    network = FakeNetwork(
+        {
+            "https://careers.example.com/robots.txt": httpx.Response(
+                200, content=b"User-agent: *\nDisallow: /*/apply$\n"
+            ),
+            "https://careers.example.com/jobs/42/apply": html_response("<p>job</p>"),
+        }
+    )
+    _, record = run("https://careers.example.com/jobs/42/apply", network)
+    assert record.status is FetchStatus.NOT_PERMITTED
+    assert network.requested("https://careers.example.com/jobs/42/apply") == 0
