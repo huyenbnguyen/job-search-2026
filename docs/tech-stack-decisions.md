@@ -24,6 +24,7 @@ Why each tool in the job search tool was chosen, what was considered instead, an
 | Logging and metrics | Structured JSON logs to a local file; run metrics in the database | Decided |
 | Job-page access | Official job-board APIs first, then robots.txt-checked JSON-LD reads; no LinkedIn | Decided |
 | HTTP client | httpx | Proposed |
+| Resume PDF text extraction | pypdf, layout mode | Decided |
 | Python tooling | uv, ruff, mypy (strict) | Proposed |
 | Later API and UI (Phase 6) | FastAPI + React/TypeScript, localhost only | Proposed |
 
@@ -257,6 +258,24 @@ Users can set a company by hand, and an automatic source never replaces it.
 **Output:** a JSONL staging file of `JobFetchRecord`s. Each record has a stable `job_key` for dedupe, a `description_hash` to detect changed text, and its source URL and retrieval time. `db import-jobs` loads this file into SQLite.
 
 **Revisit when:** a new source is added (check its terms first), or the share of `no_details` records makes the manual fallback a burden.
+
+---
+
+## Resume text extraction: pypdf
+
+**Decision:** pypdf in layout mode extracts the resume's text, which is then normalized (NFKC, single spaces, at most one blank line in a row) and stored once per distinct text. *Status: decided in Phase 1a, after comparing extractors on the user's own Google Docs PDF.*
+
+**Why:**
+- Layout mode kept every line and bullet whole and in reading order.
+- Pure Python and BSD-licensed, with no required dependencies.
+- The extracted text is what scoring sees and what quoted evidence is checked against, so its quality matters more than speed.
+
+**Alternatives considered:**
+- pypdf's default mode: put nearly every word of a Google Docs export on its own line.
+- pdfminer.six (also under pdfplumber): split dates and some wrapped lines away from their bullets.
+- PyMuPDF: AGPL-licensed, so not tried.
+
+**Revisit when:** a resume extracts badly (check with `jobsearch resume show`), or DOCX support is added. A scanned PDF has no text, and OCR isn't planned.
 
 ---
 

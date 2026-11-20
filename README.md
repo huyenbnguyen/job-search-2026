@@ -43,6 +43,33 @@ Records are stored locally. The only data sent anywhere today is the HTTP reques
 
 These requests are separate from LLM calls, which arrive in a later Phase 1 step. Those will send job and resume text to the LLM provider you configure, and this section will list what each call sends.
 
+## Load your resume
+
+Keep the PDF in `docs/resume/` or `data/`; both are gitignored. Only text-based PDFs work. A scanned image has no text to extract.
+
+```bash
+uv run jobsearch resume load docs/resume/resume.pdf   # extract and store the text
+uv run jobsearch resume show                          # print the newest version's text, as scoring sees it
+uv run jobsearch resume list                          # every stored version
+```
+
+Each distinct text is stored once in `resume_versions` and never overwritten. Loading the same text again, even from a renamed file, adds nothing. Editing the resume and loading it again adds a new version. Model scores record which version they used.
+
+## Keyword baseline
+
+A simple, non-LLM score that every model has to beat:
+
+```bash
+uv run jobsearch score baseline              # score all jobs with a description against your newest resume
+uv run jobsearch score baseline --resume 1   # or a specific resume version
+```
+
+It counts the skills from a fixed list that the job description mentions, and how many of those your resume also mentions. That share becomes a whole-number score from 1 to 5: below 20% scores 1, and 80% or more scores 5. The thresholds are `scoring.keyword_baseline.threshold_percents` in config.
+
+Scores go to `fit_predictions` with provider `baseline`. The command shows scores only for jobs you've already labeled, so the baseline can't anchor your own scores.
+
+How skills are matched, how the share maps onto 1–5 (with worked examples), the known limits, and what's stored: [docs/baseline_job_matching.md](docs/baseline_job_matching.md).
+
 ## Database
 
 Jobs are stored in a local SQLite file, by default `~/.local/share/jobsearch/jobsearch.db`. It lives outside the repository; set `database.path` in `config/config.yaml` to move it.
@@ -63,9 +90,10 @@ Tables:
 
   `jobs` also holds the title and description from the first successful fetch. They're never overwritten, so your labels and model scores always refer to the same text.
 - `job_fetch_attempts`: every fetch outcome, including closed or blocked jobs. Its `description_hash` shows if a later fetch returned different text.
-- `human_labels`: your fit score (1–5) and would-apply answer for a job, with the rubric version and optional `notes` on your reasoning. Append-only: re-scoring a job adds a row.
-- `fit_predictions`: model fit scores (1–5), each with the job scored and the model, prompt, rubric and resume versions. Kept apart from your labels.
-- `jobs_overview` (view): each job with its description, latest fetch status, and the latest `human_fit_score`, `human_would_apply` and `ai_fit_score`.
+- `human_labels`: your fit score (a whole number, 1–5; the database rejects anything else, such as 3.5) and would-apply answer for a job, with the rubric version and optional `notes` on your reasoning. Append-only: re-scoring a job adds a row.
+- `fit_predictions`: model and baseline fit scores (1–5), each with the job scored and the model, prompt, rubric and resume versions, plus `details` (JSON) on how the score was reached. Kept apart from your labels.
+- `resume_versions`: the extracted text of each distinct resume, with its hash, file name and the extractor used.
+- `jobs_overview` (view): each job with its description, latest fetch status, and the latest `human_fit_score`, `human_would_apply` and `ai_fit_score`. `ai_fit_score` is the latest prediction from any scorer, including the keyword baseline. Hide that column while you label new jobs.
 
 Set or correct a company by hand. LinkedIn jobs need this, because their URLs carry no company:
 

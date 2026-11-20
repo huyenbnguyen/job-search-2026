@@ -27,7 +27,7 @@ Phase 1 is the main spike: whether an LLM can judge job fit the way you do is th
 **Goal:** find out whether LLMs can score how well a job matches your resume the way you would, and which model and prompt do it best for the cost.
 
 **Decide before starting**
-- [ ] Final wording of the 1–5 rubric anchors (draft in `scoping.md`, Section 2)
+- [x] Final wording of the 1–5 rubric anchors: the draft as written, now `prompts/job_matching/rubric_v1.md`
 - [ ] Which 2–3 models to compare, including whether to try a local one
 - [ ] Thin in-house provider adapters or a multi-provider library
 - [ ] Spending budget for experiments
@@ -39,9 +39,9 @@ The steps below are a proposed breakdown; each one is usable on its own.
 - [ ] Project setup: package layout, typed config, SQLite with WAL mode, Alembic migrations, pytest, CI
 - [ ] `ingest` command: fetch a job URL into a normalized, versioned record with source URL and timestamp; safe against SSRF
 - [ ] Paste-text fallback for pages that can't be fetched
-- [ ] Load your resume (text-based PDF or DOCX) as a versioned profile
+- [ ] Load your resume (text-based PDF or DOCX) as a versioned profile (PDF done: `jobsearch resume load`; DOCX not yet)
 - [ ] `label` command: record a fit score (1–5) and would-apply (yes/no) for each job, with no model scores shown
-- [ ] Rubric stored as a versioned file; rubric version saved with every label
+- [x] Rubric stored as a versioned file; rubric version saved with every label
 
 *Usable outcome:* your applied-to jobs are in the database with your own scores.
 
@@ -56,7 +56,7 @@ The steps below are a proposed breakdown; each one is usable on its own.
 
 **1c. Compare models and prompts**
 - [ ] Adapters for the remaining candidate models
-- [ ] Non-LLM baseline (keyword/skill overlap mapped onto 1–5)
+- [x] Non-LLM baseline (keyword/skill overlap mapped onto 1–5): `jobsearch score baseline`
 - [ ] Experiment runner over models × prompt versions × jobs, with a repeated subset to measure run-to-run variance
 - [ ] Report: mean absolute error, within-one agreement, mean signed error, Spearman correlation, confusion matrix, variance, schema validity, fabricated-quote rate, cost, latency, and bootstrap confidence intervals
 - [ ] Every experiment records model ID, prompt, rubric and dataset versions
@@ -201,7 +201,6 @@ If the tool is ever hosted or shared, authentication and per-user authorization 
 
 | Needed by | Decision |
 |---|---|
-| Phase 1 | Rubric anchor wording |
 | Phase 1 | Candidate models and experiment budget |
 | Phase 1 | In-house adapters or a multi-provider library |
 | Phase 1 | Which job pages the URL fetcher can retrieve reliably |

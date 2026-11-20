@@ -20,6 +20,17 @@ ingestion:
     # Company career pages are skipped when robots.txt disallows them.
     respect_robots_txt: true
 
+scoring:
+  # The rubric scores are compared on, a file in prompts/job_matching/.
+  rubric_version: rubric_v1
+  keyword_baseline:
+    # Skill list in prompts/job_matching/, without the extension.
+    vocabulary: keyword_skills_v2
+    # Whole percentages of the job's listed skills found in your resume. Each one reached
+    # adds a point to a base of 1, so scores are the integers 1-5: below 20% scores 1,
+    # 80% or more scores 5. Equal-width bins, not fitted to your labels.
+    threshold_percents: [20, 40, 60, 80]
+
 logging:
   # Structured JSON log file. Keep it outside the repository or under data/.
   file: data/logs/jobsearch.log

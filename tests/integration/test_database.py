@@ -1,5 +1,6 @@
 """Database workflows against a temporary SQLite file. All data is synthetic."""
 
+import hashlib
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,16 +12,25 @@ from alembic.runtime.migration import MigrationContext
 from sqlalchemy import Engine, func, select, text
 from sqlalchemy.exc import IntegrityError
 
-from jobsearch.config import DatabaseConfig
+from jobsearch.config import DatabaseConfig, KeywordBaselineConfig
 from jobsearch.database import make_engine, session_scope
 from jobsearch.models.job import CompanySource, FetchStatus, JobFetchRecord
-from jobsearch.models.tables import Base, FitPrediction, HumanLabel, Job, JobFetchAttempt
+from jobsearch.models.tables import (
+    Base,
+    FitPrediction,
+    HumanLabel,
+    Job,
+    JobFetchAttempt,
+    ResumeVersion,
+)
 from jobsearch.services.job_import import import_records, read_records, set_job_company
 from jobsearch.services.migrations import (
     SchemaOutOfDateError,
     check_schema_current,
     upgrade_database,
 )
+from jobsearch.services.profiles import ParsedResume, save_resume_version
+from jobsearch.services.scoring.keyword_baseline import run_keyword_baseline
 
 
 @pytest.fixture
@@ -507,10 +517,10 @@ def test_label_without_fetched_text_is_allowed(engine: Engine) -> None:
     assert scores(engine) == (2, 0, None)
 
 
-@pytest.mark.parametrize("fit", [0, 6])
-def test_scores_must_be_on_the_1_to_5_scale(engine: Engine, fit: int) -> None:
+@pytest.mark.parametrize("fit", [0, 6, 3.5, 4.01])
+def test_scores_must_be_whole_numbers_from_1_to_5(engine: Engine, fit: float) -> None:
     job_id = _fetched_job(engine)
-    for row in (_label(job_id, fit, True, 1), _prediction(job_id, fit, 1)):
+    for row in (_label(job_id, fit, True, 1), _prediction(job_id, fit, 1)):  # type: ignore[arg-type]
         with pytest.raises(IntegrityError), session_scope(engine) as session:
             session.add(row)
 
@@ -698,3 +708,273 @@ def test_restore_from_backup(database: DatabaseConfig, engine: Engine, tmp_path:
         assert connection.execute(text("PRAGMA integrity_check")).scalar() == "ok"
     assert counts(restored) == (1, 1, 1)
     restored.dispose()
+
+
+def _resume(text: str, filename: str = "resume.pdf") -> ParsedResume:
+    return ParsedResume(
+        text=text,
+        text_hash=hashlib.sha256(text.encode()).hexdigest(),
+        file_hash=hashlib.sha256(filename.encode() + text.encode()).hexdigest(),
+        page_count=1,
+        source_filename=filename,
+    )
+
+
+def test_loading_the_same_resume_text_again_adds_no_version(engine: Engine) -> None:
+    with session_scope(engine) as session:
+        first, created = save_resume_version(session, _resume("Jane Doe\nPython"))
+        assert created
+    with session_scope(engine) as session:
+        again, created = save_resume_version(session, _resume("Jane Doe\nPython", "renamed.pdf"))
+        assert not created
+        assert again.id == first.id
+        assert again.source_filename == "resume.pdf"
+
+
+def test_changed_resume_text_adds_a_version_and_keeps_the_old_one(engine: Engine) -> None:
+    with session_scope(engine) as session:
+        save_resume_version(session, _resume("Jane Doe\nPython"))
+        save_resume_version(session, _resume("Jane Doe\nPython, Go"))
+    with session_scope(engine) as session:
+        texts = session.scalars(select(ResumeVersion.text).order_by(ResumeVersion.id)).all()
+    assert texts == ["Jane Doe\nPython", "Jane Doe\nPython, Go"]
+
+
+def test_upgrade_to_0007_adds_resume_versions_and_downgrade_removes_it(
+    database: DatabaseConfig,
+) -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    upgrade_database(database, "0006")
+    upgrade_database(database)
+    engine = make_engine(database)
+    with session_scope(engine) as session:
+        save_resume_version(session, _resume("Jane Doe"))
+
+    config = Config("alembic.ini")
+    config.attributes["database"] = database
+    command.downgrade(config, "0006")
+    with engine.connect() as connection:
+        tables = {row[0] for row in connection.execute(text("SELECT name FROM sqlite_master"))}
+    engine.dispose()
+    assert "resume_versions" not in tables
+    assert "jobs" in tables
+
+
+def _baseline_setup(engine: Engine) -> ResumeVersion:
+    with session_scope(engine) as session:
+        import_records(
+            session,
+            [
+                record(key="greenhouse:examplecorp:1", description="Python and Kubernetes."),
+                record(key="greenhouse:examplecorp:2", description="Go and Rust services."),
+                record(key="greenhouse:examplecorp:3", description="Friendly team, good snacks."),
+                record(key="greenhouse:examplecorp:4", status=FetchStatus.UNAVAILABLE),
+            ],
+            applied=True,
+        )
+        resume, _ = save_resume_version(session, _resume("Jane Doe\nPython, Kubernetes, Go"))
+        return resume
+
+
+def test_keyword_baseline_stores_scores_with_versions_and_details(engine: Engine) -> None:
+    resume = _baseline_setup(engine)
+    with session_scope(engine) as session:
+        summary = run_keyword_baseline(
+            session, resume, KeywordBaselineConfig(), "rubric_v1", "run-a"
+        )
+    assert summary.jobs_scored == 2
+    assert summary.jobs_without_skills == [3]
+    with session_scope(engine) as session:
+        predictions = session.scalars(select(FitPrediction).order_by(FitPrediction.job_id)).all()
+        assert [(p.job_id, p.fit_score) for p in predictions] == [(1, 5), (2, 3)]
+        first = predictions[0]
+        assert (first.provider, first.model_id, first.prompt_version) == (
+            "baseline",
+            "keyword_overlap",
+            "keyword_skills_v2",
+        )
+        assert first.resume_version == resume.text_hash
+        assert first.rubric_version == "rubric_v1"
+        assert predictions[1].details == {
+            "matched_count": 1,
+            "job_skill_count": 2,
+            "matched": ["Go"],
+            "missing": ["Rust"],
+            "threshold_percents": [20, 40, 60, 80],
+        }
+        assert all(type(p.fit_score) is int for p in predictions)
+
+
+def test_keyword_baseline_rerun_adds_nothing_unless_an_input_changes(engine: Engine) -> None:
+    resume = _baseline_setup(engine)
+    with session_scope(engine) as session:
+        run_keyword_baseline(session, resume, KeywordBaselineConfig(), "rubric_v1", "run-a")
+    with session_scope(engine) as session:
+        again = run_keyword_baseline(session, resume, KeywordBaselineConfig(), "rubric_v1", "run-b")
+    assert (again.jobs_scored, again.jobs_unchanged) == (0, 2)
+    with session_scope(engine) as session:
+        changed = run_keyword_baseline(
+            session,
+            resume,
+            KeywordBaselineConfig(threshold_percents=(10, 30, 50, 70)),
+            "rubric_v1",
+            "run-c",
+        )
+    assert changed.jobs_scored == 2
+    with session_scope(engine) as session:
+        assert session.scalar(select(func.count()).select_from(FitPrediction)) == 4
+
+
+def test_keyword_baseline_needs_an_existing_rubric_file(engine: Engine) -> None:
+    resume = _baseline_setup(engine)
+    with pytest.raises(ValueError, match="no rubric file"), session_scope(engine) as session:
+        run_keyword_baseline(session, resume, KeywordBaselineConfig(), "rubric_v99", "run-a")
+
+
+def test_score_baseline_command_hides_scores_for_unlabeled_jobs(
+    database: DatabaseConfig, engine: Engine, tmp_path: Path
+) -> None:
+    from typer.testing import CliRunner
+
+    from jobsearch.cli import app
+
+    _baseline_setup(engine)
+    with session_scope(engine) as session:
+        session.add(_label(2, 4, True, 1))
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        f"database:\n  path: {database.path}\nlogging:\n  file: {tmp_path / 'log.jsonl'}\n"
+    )
+    result = CliRunner().invoke(
+        app, ["score", "baseline", "--config", str(config_file)], terminal_width=200
+    )
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "2 jobs scored" in output
+    assert "Scores for 1 jobs you haven't labeled are hidden" in output
+    table = output.split("Keyword baseline on jobs you've labeled")[1]
+    assert "1/2" in table
+    assert "2/2" not in table
+
+
+def test_score_baseline_shows_a_stored_score_once_the_job_is_labeled(
+    database: DatabaseConfig, engine: Engine, tmp_path: Path
+) -> None:
+    from typer.testing import CliRunner
+
+    from jobsearch.cli import app
+
+    _baseline_setup(engine)
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        f"database:\n  path: {database.path}\nlogging:\n  file: {tmp_path / 'log.jsonl'}\n"
+    )
+
+    def run() -> str:
+        result = CliRunner().invoke(
+            app, ["score", "baseline", "--config", str(config_file)], terminal_width=200
+        )
+        assert result.exit_code == 0, result.output
+        return " ".join(result.output.split())
+
+    first = run()
+    assert "2 jobs scored" in first
+    assert "Keyword baseline on jobs you've labeled" not in first
+    assert "Scores for 2 jobs you haven't labeled are hidden" in first
+
+    with session_scope(engine) as session:
+        session.add(_label(2, 4, True, 1))
+    second = run()
+    assert "0 jobs scored, 2 already scored" in second
+    table = second.split("Keyword baseline on jobs you've labeled")[1]
+    assert "1/2" in table and "2/2" not in table
+    assert "Scores for 1 jobs you haven't labeled are hidden" in second
+    with session_scope(engine) as session:
+        assert session.scalar(select(func.count()).select_from(FitPrediction)) == 2
+
+
+def test_upgrade_to_0008_adds_prediction_details_and_downgrade_removes_it(
+    database: DatabaseConfig,
+) -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    upgrade_database(database)
+    config = Config("alembic.ini")
+    config.attributes["database"] = database
+    command.downgrade(config, "0007")
+    engine = make_engine(database)
+    with engine.connect() as connection:
+        columns = [row[1] for row in connection.execute(text("PRAGMA table_info(fit_predictions)"))]
+    engine.dispose()
+    assert "details" not in columns
+    assert "resume_version" in columns
+
+
+def test_raw_sql_fractional_score_is_rejected_but_text_digits_become_integers(
+    engine: Engine,
+) -> None:
+    job_id = _fetched_job(engine)
+    insert = (
+        "INSERT INTO human_labels (job_id, fit_score, would_apply, rubric_version, labeled_at) "
+        "VALUES (:job_id, {score}, 1, 'rubric_v1', '2026-02-01 00:00:00')"
+    )
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(text(insert.format(score="3.5")), {"job_id": job_id})
+    with engine.begin() as connection:
+        connection.execute(text(insert.format(score="'4'")), {"job_id": job_id})
+        stored = connection.execute(
+            text("SELECT fit_score, typeof(fit_score) FROM human_labels")
+        ).one()
+    assert tuple(stored) == (4, "integer")
+
+
+def test_upgrade_to_0009_refuses_fractional_scores_and_keeps_the_view(
+    database: DatabaseConfig,
+) -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    upgrade_database(database, "0008")
+    engine = make_engine(database)
+    with engine.begin() as connection:
+        view_before = connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 'jobs_overview'")
+        ).scalar()
+        connection.execute(
+            text(
+                "INSERT INTO jobs (id, job_key, source, source_url, applied, first_seen_at) "
+                "VALUES (1, 'k1', 'greenhouse', 'u1', 1, '2026-01-01 00:00:00')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO human_labels (id, job_id, fit_score, would_apply, rubric_version, "
+                "labeled_at) VALUES (1, 1, 3.5, 1, 'rubric_v1', '2026-01-02 00:00:00')"
+            )
+        )
+    with pytest.raises(RuntimeError, match="1 rows in human_labels"):
+        upgrade_database(database)
+
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE human_labels SET fit_score = 4"))
+    upgrade_database(database)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT human_fit_score FROM jobs_overview")).scalar() == 4
+        view_after = connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 'jobs_overview'")
+        ).scalar()
+    assert view_after == view_before
+
+    config = Config("alembic.ini")
+    config.attributes["database"] = database
+    command.downgrade(config, "0008")
+    with engine.begin() as connection:
+        schema = connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 'human_labels'")
+        ).scalar()
+        assert connection.execute(text("SELECT COUNT(*) FROM jobs_overview")).scalar() == 1
+    engine.dispose()
+    assert "BETWEEN 1 AND 5" in str(schema)

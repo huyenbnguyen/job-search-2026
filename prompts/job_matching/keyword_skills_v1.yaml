@@ -1,0 +1,227 @@
+# Skill vocabulary for the keyword-overlap baseline (not an LLM prompt).
+#
+# A generic list of software-engineering skills, written without reference to any one
+# resume or to the user's labels. Never edit a version that predictions already use:
+# copy it to keyword_skills_v2.yaml instead.
+#
+# Each skill matches if any of its terms appears as a whole word or phrase:
+# - `terms` match in any case. Without `terms` or `exact_case`, the name is the term.
+# - `exact_case` match only with this exact capitalization, for names that are also
+#   common English words ("Go", "Rust", "Spark").
+# Spaces in a term also match hyphens, and a trailing "s" is allowed (API -> APIs).
+version: keyword_skills_v1
+skills:
+  # Languages
+  - name: Python
+  - name: Java
+  - name: Go
+    terms: [golang]
+    exact_case: [Go]
+  - name: Rust
+    exact_case: [Rust]
+  - name: C++
+    terms: [c++, cpp]
+  - name: C#
+    terms: [c#]
+  - name: JavaScript
+    terms: [javascript, es6]
+  - name: TypeScript
+  - name: Kotlin
+  - name: Scala
+  - name: Ruby
+  - name: PHP
+  - name: Swift
+    exact_case: [Swift]
+  - name: Elixir
+  - name: Haskell
+  - name: Clojure
+  - name: Bash
+    terms: [bash, shell scripting]
+  - name: SQL
+  # Frameworks and runtimes
+  - name: .NET
+    terms: [.net, asp.net, .net core]
+  - name: Node.js
+    terms: [node.js, nodejs]
+  - name: React
+    exact_case: [React]
+    terms: [react.js, reactjs]
+  - name: Angular
+    exact_case: [Angular]
+  - name: Vue
+    terms: [vue.js, vuejs]
+    exact_case: [Vue]
+  - name: Django
+  - name: Flask
+  - name: FastAPI
+  - name: Spring
+    terms: [spring boot, spring framework]
+    exact_case: [Spring]
+  - name: Ruby on Rails
+    terms: [ruby on rails]
+    exact_case: [Rails]
+  - name: Hibernate
+  - name: RxJava
+  - name: Dagger
+    exact_case: [Dagger]
+  - name: gRPC
+  - name: Protocol Buffers
+    terms: [protobuf, protocol buffers]
+  - name: GraphQL
+  - name: REST
+    terms: [rest, restful]
+    exact_case: [REST]
+  - name: OpenAPI
+    terms: [openapi, swagger]
+  # Data stores and messaging
+  - name: PostgreSQL
+    terms: [postgresql, postgres]
+  - name: MySQL
+  - name: SQL Server
+    terms: [sql server, mssql]
+  - name: Oracle Database
+    terms: [oracle database, oracle db, pl/sql]
+  - name: NoSQL
+  - name: MongoDB
+    terms: [mongodb, mongo]
+  - name: Cassandra
+  - name: DynamoDB
+  - name: Redis
+  - name: Memcached
+  - name: Elasticsearch
+    terms: [elasticsearch, opensearch]
+  - name: Kafka
+  - name: RabbitMQ
+  - name: SQS
+  - name: Kinesis
+  - name: Pub/Sub
+    terms: [pub/sub, pubsub]
+  - name: Snowflake
+  - name: BigQuery
+  - name: Redshift
+  - name: Databricks
+  - name: Spark
+    terms: [apache spark, pyspark]
+    exact_case: [Spark]
+  - name: Hadoop
+  - name: Apache Hive
+    terms: [apache hive]
+  - name: Flink
+  - name: Airflow
+  - name: dbt
+    exact_case: [dbt, DBT]
+  - name: ETL
+    terms: [etl, elt]
+  - name: Data pipelines
+    terms: [data pipeline]
+  - name: Data modeling
+    terms: [data modeling, data modelling, data model]
+  - name: Tableau
+  - name: Looker
+  # Cloud
+  - name: AWS
+    terms: [aws, amazon web services]
+  - name: GCP
+    terms: [gcp, google cloud]
+  - name: Azure
+  - name: EC2
+  - name: S3
+    exact_case: [S3]
+  - name: Lambda
+    terms: [aws lambda]
+    exact_case: [Lambda]
+  - name: ECS
+  - name: EKS
+  - name: RDS
+  - name: CloudWatch
+  - name: CloudFormation
+  - name: API Gateway
+  - name: Serverless
+  # Infrastructure and operations
+  - name: Docker
+    terms: [docker, containers, containerization]
+  - name: Kubernetes
+    terms: [kubernetes, k8s]
+  - name: Helm
+    exact_case: [Helm]
+  - name: Terraform
+  - name: Infrastructure as code
+    terms: [infrastructure as code, iac]
+  - name: Ansible
+  - name: Linux
+    terms: [linux, unix]
+  - name: CI/CD
+    terms: [ci/cd, continuous integration, continuous delivery, continuous deployment]
+  - name: Jenkins
+  - name: GitHub Actions
+  - name: GitLab
+  - name: Git
+  - name: Observability
+    terms: [observability, monitoring, alerting]
+  - name: Prometheus
+  - name: Grafana
+  - name: Datadog
+  - name: OpenTelemetry
+  - name: On-call
+    terms: [on-call, on call, incident response]
+  - name: Feature flags
+    terms: [feature flag, launchdarkly]
+  - name: Networking
+    terms: [networking, tcp/ip, dns, load balancing, load balancer]
+  - name: Service mesh
+    terms: [service mesh, envoy, istio]
+  # Architecture and engineering practices
+  - name: Distributed systems
+    terms: [distributed system]
+  - name: Microservices
+    terms: [microservice, service-oriented architecture, soa]
+  - name: Backend
+    terms: [backend, back-end, back end, server-side]
+  - name: Frontend
+    terms: [frontend, front-end, front end]
+  - name: Full stack
+    terms: [full stack, full-stack]
+  - name: API design
+    terms: [api, api design]
+  - name: System design
+    terms: [system design, software architecture, system architecture]
+  - name: Scalability
+    terms: [scalability, scalable, scale]
+  - name: High availability
+    terms: [high availability, fault tolerance, fault-tolerant, reliability]
+  - name: Performance
+    terms: [performance, latency, throughput]
+  - name: Caching
+    terms: [caching, cache]
+  - name: Concurrency
+    terms: [concurrency, multithreading, multi-threading, asynchronous]
+  - name: Event-driven architecture
+    terms: [event-driven, event driven, event streaming, message queue]
+  - name: Databases
+    terms: [database, relational database, rdbms]
+  - name: Security
+    terms: [security, authentication, authorization, oauth, encryption]
+  - name: Testing
+    terms: [unit test, integration test, automated testing, test automation, tdd]
+  - name: Code review
+    terms: [code review]
+  - name: Agile
+    terms: [agile, scrum]
+  - name: Mentoring
+    terms: [mentor, mentoring, mentorship]
+  - name: Data structures and algorithms
+    terms: [data structure, algorithm]
+  - name: Computer science degree
+    terms: [computer science]
+  # Machine learning and AI
+  - name: Machine learning
+    terms: [machine learning, ml]
+  - name: Deep learning
+    terms: [deep learning, neural network]
+  - name: LLMs
+    terms: [llm, large language model, generative ai, genai]
+  - name: PyTorch
+  - name: TensorFlow
+  - name: MLOps
+  - name: AI coding tools
+    terms: [claude code, cursor, github copilot, copilot]

@@ -5,10 +5,11 @@ description: Rules for the fit-scoring rubric, human labels, model and prompt ex
 
 # Fit scoring and evaluation
 
-The draft rubric and the full rationale are in `docs/scoping.md`, Section 2 ("Fit-Scoring Rubric").
+The rubric is `prompts/job_matching/rubric_v1.md`. The rationale is in `docs/scoping.md`, Section 2 ("Fit-Scoring Rubric").
 
 ## Rubric and labels
-- Users and models score on the same 1–5 anchored rubric, stored as a versioned file (proposed: `prompts/job_matching/rubric_v1.md`).
+- Users and models score on the same 1–5 anchored rubric, stored as a versioned file. The rubric file is the only copy of the anchors; don't repeat them in docs or prompts, load the file.
+- Never edit a rubric file that labels already use. A wording change is a new file (`rubric_v2.md`).
 - Record the rubric version with every label and prediction. Never compare scores made under different rubric versions.
 - The user gives two labels per job:
   - **Fit score (1–5):** qualification fit only. Models are graded against this.

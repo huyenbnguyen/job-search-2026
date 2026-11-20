@@ -11,6 +11,8 @@
   re-scoring pass adds a row, so earlier labels stay for the consistency check.
 - `fit_predictions`: model fit scores (1-5), kept apart from human labels, each tied to
   the job, resume version, model, prompt, and rubric that produced it.
+- `resume_versions`: the text extracted from each distinct resume, never overwritten.
+  `text_hash` is the resume version that predictions record.
 
 `jobs_overview` shows the latest of each as `human_fit_score`, `human_would_apply`,
 and `ai_fit_score`. Labeling must never show model scores before the user scores a job.
@@ -20,6 +22,7 @@ from datetime import datetime
 from typing import Any, ClassVar
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -84,7 +87,7 @@ class JobFetchAttempt(Base):
 class HumanLabel(Base):
     __tablename__ = "human_labels"
     __table_args__ = (
-        CheckConstraint("fit_score BETWEEN 1 AND 5", name="ck_human_labels_fit_score"),
+        CheckConstraint("fit_score IN (1, 2, 3, 4, 5)", name="ck_human_labels_fit_score"),
         Index("ix_human_labels_job_id", "job_id"),
     )
 
@@ -101,7 +104,7 @@ class HumanLabel(Base):
 class FitPrediction(Base):
     __tablename__ = "fit_predictions"
     __table_args__ = (
-        CheckConstraint("fit_score BETWEEN 1 AND 5", name="ck_fit_predictions_fit_score"),
+        CheckConstraint("fit_score IN (1, 2, 3, 4, 5)", name="ck_fit_predictions_fit_score"),
         Index("ix_fit_predictions_job_id", "job_id"),
     )
 
@@ -114,4 +117,25 @@ class FitPrediction(Base):
     rubric_version: Mapped[str] = mapped_column(String(64))
     resume_version: Mapped[str] = mapped_column(String(64))
     run_id: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime]
+    # How the score was reached, as JSON. For the keyword baseline: the matched and
+    # missing skills, their counts, and the threshold percents. Never resume text.
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class ResumeVersion(Base):
+    """One distinct resume text. Loading the same text again, even renamed, adds nothing."""
+
+    __tablename__ = "resume_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # SHA-256 of `text`; the version that predictions record as `resume_version`.
+    text_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    text: Mapped[str] = mapped_column(Text)
+    # Only the file's name: the original file stays where the user keeps it.
+    source_filename: Mapped[str] = mapped_column(Text)
+    file_hash: Mapped[str] = mapped_column(String(64))
+    page_count: Mapped[int]
+    # The extractor and its version, since another extractor can produce different text.
+    parser: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime]
