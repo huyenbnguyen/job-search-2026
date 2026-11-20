@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.14",
     "httpx>=0.28",
+    "litellm==1.106.7",
     "pydantic>=2.9",
     "pypdf>=7.1",
     "pyyaml>=6.0",
