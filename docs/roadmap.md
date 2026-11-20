@@ -85,7 +85,7 @@ The steps below are a proposed breakdown; each one is usable on its own.
 - [ ] Source adapters for permitted sources only, behind a common interface; one failing source doesn't fail the run
 - [ ] Deduplication on a stable job key
 - [ ] Preferences: roles, seniority, country, city, remote/hybrid/onsite, each marked required or preferred
-- [ ] Requirement extraction into structured fields (location, work arrangement, skills, seniority), stored once per job version
+- [ ] Requirement extraction into structured fields (location, work arrangement, skills, seniority), stored once per job
 - [ ] Deterministic hard-constraint filtering; the LLM score only ranks jobs that pass
 - [ ] Ranking with the configuration chosen in Phase 1
 - [ ] `search` and `review` commands showing ranked jobs with explanations and evidence
@@ -109,7 +109,7 @@ The steps below are a proposed breakdown; each one is usable on its own.
 - [ ] Scheduled runs through the local OS scheduler (cron or systemd timer) with an explicit timezone
 - [ ] Run IDs and persisted run status (started, finished, failed, partial); last successful run recorded; missed runs detected
 - [ ] Spend cap, job limit, and concurrency limit enforced from config
-- [ ] Your accept/reject decisions and reasons stored append-only, linked to the exact job version and prediction
+- [ ] Your accept/reject decisions and reasons stored append-only, linked to the exact job and prediction
 - [ ] Decisions flow into the evaluation set
 - [ ] Development/held-out split; tuning on development only, confirmation on held-out
 - [ ] Error analysis: failures categorized and turned into regression tests or evaluation cases

@@ -47,6 +47,6 @@ The draft rubric and the full rationale are in `docs/scoping.md`, Section 2 ("Fi
 - Never invent numeric targets or results.
 
 ## Feedback loop (Phase 3)
-- Store feedback (fit labels, rejection reasons, corrections) append-only, linked to the exact job version and prediction.
+- Store feedback (fit labels, rejection reasons, corrections) append-only, linked to the exact job and prediction.
 - Feedback updates the evaluation set first. It never silently changes ranking behavior; changes are measured offline before promotion.
 - Turn representative failures into regression tests or reviewed evaluation cases.
