@@ -109,14 +109,29 @@ def test_vocabulary_file_version_must_match_its_name(tmp_path: Path) -> None:
         load_vocabulary("skills_v2", tmp_path)
 
 
-def test_checked_in_vocabulary_loads_and_compiles() -> None:
-    vocabulary = load_vocabulary(KeywordBaselineConfig().vocabulary)
-    matcher = SkillMatcher(vocabulary)
+@pytest.mark.parametrize("version", ["keyword_skills_v1", "keyword_skills_v2"])
+def test_checked_in_vocabularies_load_and_compile(version: str) -> None:
+    matcher = SkillMatcher(load_vocabulary(version))
     assert matcher.find("Python services on Kubernetes (k8s) and PostgreSQL") == [
         "Python",
         "PostgreSQL",
         "Kubernetes",
     ]
+
+
+@pytest.mark.parametrize(
+    ("text", "has_rest"),
+    [
+        ("Build REST APIs", True),
+        ("RESTful services", True),
+        ("Restful design", True),
+        ("You'll work with the rest of the team", False),
+        ("Rest assured, we value balance", False),
+    ],
+)
+def test_default_vocabulary_matches_rest_only_as_the_api_style(text: str, has_rest: bool) -> None:
+    matcher = SkillMatcher(load_vocabulary(KeywordBaselineConfig().vocabulary))
+    assert ("REST" in matcher.find(text)) is has_rest
 
 
 @pytest.mark.parametrize(

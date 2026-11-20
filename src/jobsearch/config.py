@@ -78,7 +78,7 @@ class DatabaseConfig(_Section):
 
 class KeywordBaselineConfig(_Section):
     # A file in prompts/job_matching/, without the .yaml extension.
-    vocabulary: str = "keyword_skills_v1"
+    vocabulary: str = "keyword_skills_v2"
     # Whole percentages of the job's skills found in the resume. Reaching each one adds a
     # point to a base score of 1, so four ascending thresholds give the integer scores 1-5.
     # Compared in integer arithmetic: no floating point anywhere in the score.

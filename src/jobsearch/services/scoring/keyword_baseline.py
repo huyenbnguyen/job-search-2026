@@ -123,7 +123,10 @@ class BaselineRunSummary:
     jobs_unchanged: int = 0
     # The description mentions no vocabulary skill.
     jobs_without_skills: list[int] = field(default_factory=list)
+    # Predictions this run stored.
     prediction_ids: list[int] = field(default_factory=list)
+    # One prediction per scored job for these inputs: this run's, or the stored one it reused.
+    current_prediction_ids: list[int] = field(default_factory=list)
 
 
 def run_keyword_baseline(
@@ -146,8 +149,12 @@ def run_keyword_baseline(
     ).all()
     for job in jobs:
         assert job.description_text is not None
-        if _already_scored(session, job.id, vocabulary.version, rubric_version, resume, thresholds):
+        earlier = _earlier_prediction(
+            session, job.id, vocabulary.version, rubric_version, resume, thresholds
+        )
+        if earlier is not None:
             summary.jobs_unchanged += 1
+            summary.current_prediction_ids.append(earlier)
             continue
         result = score_text(matcher, job.description_text, resume_skills, thresholds)
         if result is None:
@@ -175,20 +182,23 @@ def run_keyword_baseline(
         session.add(prediction)
         session.flush()
         summary.prediction_ids.append(prediction.id)
+        summary.current_prediction_ids.append(prediction.id)
         summary.jobs_scored += 1
     return summary
 
 
-def _already_scored(
+def _earlier_prediction(
     session: Session,
     job_id: int,
     vocabulary_version: str,
     rubric_version: str,
     resume: ResumeVersion,
     thresholds: list[int],
-) -> bool:
-    earlier = session.scalars(
-        select(FitPrediction.details).where(
+) -> int | None:
+    """The newest stored prediction for this job with the same inputs, or None."""
+    earlier = session.execute(
+        select(FitPrediction.id, FitPrediction.details)
+        .where(
             FitPrediction.job_id == job_id,
             FitPrediction.provider == PROVIDER,
             FitPrediction.model_id == MODEL_ID,
@@ -196,5 +206,13 @@ def _already_scored(
             FitPrediction.rubric_version == rubric_version,
             FitPrediction.resume_version == resume.text_hash,
         )
+        .order_by(FitPrediction.id.desc())
     ).all()
-    return any(details and details.get("threshold_percents") == thresholds for details in earlier)
+    return next(
+        (
+            pid
+            for pid, details in earlier
+            if details and details.get("threshold_percents") == thresholds
+        ),
+        None,
+    )

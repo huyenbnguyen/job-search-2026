@@ -276,7 +276,7 @@ def score_baseline(
             config.scoring.rubric_version,
             run_id,
         )
-        rows = _labeled_baseline_rows(session, summary.prediction_ids)
+        rows = _labeled_baseline_rows(session, summary.current_prediction_ids)
         resume_label = f"{resume.id} ({resume.text_hash[:12]})"
     engine.dispose()
     _log.info(
@@ -299,7 +299,7 @@ def score_baseline(
         console.print(f"No known skills in the description, not scored: job_id {ids}")
     if rows:
         _print_baseline_table(rows)
-    hidden = summary.jobs_scored - len(rows)
+    hidden = len(summary.current_prediction_ids) - len(rows)
     if hidden:
         console.print(
             f"Scores for {hidden} jobs you haven't labeled are hidden. Label them first, "
@@ -308,7 +308,7 @@ def score_baseline(
 
 
 def _labeled_baseline_rows(session: Session, prediction_ids: list[int]) -> list[tuple[str, ...]]:
-    """This run's scores, for jobs the user has already labeled only."""
+    """The scores for this run's inputs, for jobs the user has already labeled only."""
     rows: list[tuple[str, ...]] = []
     for prediction_id in prediction_ids:
         prediction = session.get(FitPrediction, prediction_id)

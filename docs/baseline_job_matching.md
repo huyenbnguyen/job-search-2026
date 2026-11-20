@@ -4,7 +4,7 @@ The keyword baseline is a simple, non-LLM fit score. Every LLM scorer is compare
 
 ## How a job is scored
 
-1. It finds which skills from a fixed list (`prompts/job_matching/keyword_skills_v1.yaml`) the job description mentions. Call that count `total`.
+1. It finds which skills from a fixed list (`prompts/job_matching/keyword_skills_v2.yaml`) the job description mentions. Call that count `total`.
 2. It counts how many of those skills the resume also mentions. Call that `matched`.
 3. It turns `matched` out of `total` into a whole-number score from 1 to 5, using the percentages in `scoring.keyword_baseline.threshold_percents` in config (default `[20, 40, 60, 80]`).
 
@@ -18,7 +18,9 @@ The skill list is generic: it was written without reference to any one resume or
 - Names that are also everyday words match only with their exact capitalization, listed under `exact_case`. "Go" the language matches, but "let go of" doesn't.
 - A space in a term also matches a hyphen ("distributed systems" matches "distributed-systems"), and a trailing "s" is allowed ("API" matches "APIs").
 
-The list is versioned. Never edit a version that stored scores already use. Copy it to `keyword_skills_v2.yaml` and set `scoring.keyword_baseline.vocabulary` instead.
+The list is versioned. Never edit a version that stored scores already use. Copy it to the next version and set `scoring.keyword_baseline.vocabulary` instead. Each file's header says what changed from the version before:
+- `keyword_skills_v2` (the default): REST no longer matches a lowercase "rest", which is usually the English word ("the rest of the team").
+- `keyword_skills_v1`: the first list. Kept so its stored scores stay reproducible.
 
 ## From a share of skills to a 1–5 score
 
@@ -89,11 +91,12 @@ Each score is a row in `fit_predictions` with:
 - the rubric version and the resume version (the resume text's hash)
 - `details` (JSON): the matched and missing skills, their counts, and the threshold percents
 
-Rerunning with the same resume, skill list, rubric and thresholds adds nothing. `jobsearch score baseline` shows scores only for jobs already labeled, so the baseline can't anchor the user's own scores.
+Rerunning with the same resume, skill list, rubric and thresholds adds nothing. `jobsearch score baseline` shows the scores for the current inputs, whether this run or an earlier one stored them, but only for jobs already labeled, so the baseline can't anchor the user's own scores.
 
-To see what each job was missing:
+To see what each job you've labeled was missing (jobs you haven't labeled stay hidden, as in the command):
 
 ```bash
 sqlite3 ~/.local/share/jobsearch/jobsearch.db \
-  "SELECT job_id, fit_score, json_extract(details, '$.missing') FROM fit_predictions WHERE provider = 'baseline';"
+  "SELECT job_id, fit_score, json_extract(details, '$.missing') FROM fit_predictions
+   WHERE provider = 'baseline' AND job_id IN (SELECT job_id FROM human_labels);"
 ```

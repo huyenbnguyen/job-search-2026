@@ -793,7 +793,7 @@ def test_keyword_baseline_stores_scores_with_versions_and_details(engine: Engine
         assert (first.provider, first.model_id, first.prompt_version) == (
             "baseline",
             "keyword_overlap",
-            "keyword_skills_v1",
+            "keyword_skills_v2",
         )
         assert first.resume_version == resume.text_hash
         assert first.rubric_version == "rubric_v1"
@@ -857,6 +857,42 @@ def test_score_baseline_command_hides_scores_for_unlabeled_jobs(
     table = output.split("Keyword baseline on jobs you've labeled")[1]
     assert "1/2" in table
     assert "2/2" not in table
+
+
+def test_score_baseline_shows_a_stored_score_once_the_job_is_labeled(
+    database: DatabaseConfig, engine: Engine, tmp_path: Path
+) -> None:
+    from typer.testing import CliRunner
+
+    from jobsearch.cli import app
+
+    _baseline_setup(engine)
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        f"database:\n  path: {database.path}\nlogging:\n  file: {tmp_path / 'log.jsonl'}\n"
+    )
+
+    def run() -> str:
+        result = CliRunner().invoke(
+            app, ["score", "baseline", "--config", str(config_file)], terminal_width=200
+        )
+        assert result.exit_code == 0, result.output
+        return " ".join(result.output.split())
+
+    first = run()
+    assert "2 jobs scored" in first
+    assert "Keyword baseline on jobs you've labeled" not in first
+    assert "Scores for 2 jobs you haven't labeled are hidden" in first
+
+    with session_scope(engine) as session:
+        session.add(_label(2, 4, True, 1))
+    second = run()
+    assert "0 jobs scored, 2 already scored" in second
+    table = second.split("Keyword baseline on jobs you've labeled")[1]
+    assert "1/2" in table and "2/2" not in table
+    assert "Scores for 1 jobs you haven't labeled are hidden" in second
+    with session_scope(engine) as session:
+        assert session.scalar(select(func.count()).select_from(FitPrediction)) == 2
 
 
 def test_upgrade_to_0008_adds_prediction_details_and_downgrade_removes_it(
