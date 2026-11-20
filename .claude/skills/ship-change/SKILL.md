@@ -32,6 +32,17 @@ git checkout -b <type>/<short-description>
 - Every check must pass. If a test fails, fix the cause; never skip, delete, or weaken a test to get green.
 - If the commands are still TBD, tell the user which checks you couldn't run.
 
+### Keep each pull request under about 700 lines
+
+- Count added plus deleted lines: `git diff --numstat main...HEAD`. Aim for under 700 per pull request, so each one can be reviewed by hand.
+- Generated files, such as `uv.lock`, are exempt from the count, but they don't hide inside a feature PR. A dependency change (`pyproject.toml` plus the lockfile, with its decision-log entry) gets a pull request of its own, and its body says which lines are generated.
+- When a change is bigger, split it into a stack before committing. Each pull request:
+  - holds one reviewable piece, such as config, a module and its tests, or a command and its docs;
+  - passes every check from this step on its own;
+  - is based on the previous one's branch;
+  - lists the whole stack and the merge order in its body.
+- Plan the split up front, in the approval request (step 4), rather than after a large branch exists.
+
 ## 4. Request approval
 
 Before committing, show the user:
@@ -84,4 +95,5 @@ Follow-ups, open questions, or decision-log entries added.
 ```
 
 - Share the pull request link with the user.
+- For a stack, tell the user to merge in order, and to check that each pull request's base is `main` before merging it. GitHub retargets the next PR to `main` only when the merged branch gets deleted. Otherwise a PR merges into the previous branch and never reaches `main`, as happened to PRs #4–#7.
 - Never merge the pull request yourself, and never force-push to `main`.
