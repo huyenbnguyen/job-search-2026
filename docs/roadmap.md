@@ -46,7 +46,7 @@ The steps below are a proposed breakdown; each one is usable on its own.
 *Usable outcome:* your applied-to jobs are in the database with your own scores.
 
 **1b. One model scores a job**
-- [ ] Provider-agnostic LLM interface and a first adapter
+- [x] Provider-agnostic LLM interface and a first adapter: `LLMClient` + LiteLLM; `jobsearch llm list` and `llm check`
 - [ ] Fit-scoring prompt (`fit_score_v1`): requirement-by-requirement status (met, partial, not met, unclear) with a quoted resume line, then an overall 1–5 score and rationale
 - [ ] Pydantic validation; code checks every quote against the resume
 - [ ] Deterministic coverage score computed from the requirement statuses

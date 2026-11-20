@@ -1,6 +1,7 @@
 """Command-line entry point. Keep commands thin; logic lives in services/."""
 
 import logging
+import os
 import uuid
 from collections import Counter
 from itertools import islice
@@ -14,8 +15,10 @@ from rich.table import Table
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from jobsearch.config import DatabaseConfig, load_config
+from jobsearch.config import DatabaseConfig, LLMConfig, load_config
 from jobsearch.database import make_engine, session_scope
+from jobsearch.llm.client import LLMClient
+from jobsearch.llm.types import CallStatus
 from jobsearch.models.job import CompanySource, FetchStatus, JobFetchRecord
 from jobsearch.models.tables import FitPrediction, HumanLabel, Job, ResumeVersion
 from jobsearch.observability.logging import configure_logging
@@ -24,6 +27,7 @@ from jobsearch.services.ingestion.fetch import SafeFetcher
 from jobsearch.services.ingestion.sources import FetchContext, default_adapters
 from jobsearch.services.ingestion.sources.base import normalize_url
 from jobsearch.services.job_import import import_records, read_records, set_job_company
+from jobsearch.services.llm_check import run_check
 from jobsearch.services.migrations import (
     SchemaOutOfDateError,
     check_schema_current,
@@ -39,6 +43,8 @@ resume_app = typer.Typer(no_args_is_help=True, help="Your resume, stored as vers
 app.add_typer(resume_app, name="resume")
 score_app = typer.Typer(no_args_is_help=True, help="Score jobs against your resume.")
 app.add_typer(score_app, name="score")
+llm_app = typer.Typer(no_args_is_help=True, help="AI models configured in llm.models.")
+app.add_typer(llm_app, name="llm")
 console = Console()
 _log = logging.getLogger("jobsearch.cli")
 ConfigOption = Annotated[Path | None, typer.Option("--config", help="Config YAML")]
@@ -348,3 +354,110 @@ def _print_baseline_table(rows: list[tuple[str, ...]]) -> None:
     for row in rows:
         table.add_row(*row)
     console.print(table)
+
+
+@llm_app.command("list")
+def llm_list(config_path: ConfigOption = None) -> None:
+    """Show the configured models, their prices, and whether each one's API key is set."""
+    config = load_config(config_path)
+    if not config.llm.models:
+        console.print("No models configured. Add them under llm.models in config/config.yaml.")
+        raise typer.Exit(1)
+    table = Table(title="Configured models")
+    table.add_column("Name")
+    table.add_column("Runs")
+    table.add_column("Model", overflow="fold")
+    table.add_column("Context", justify="right")
+    table.add_column("$ per M tokens in/out", justify="right")
+    table.add_column("JSON mode")
+    table.add_column("API key")
+    for name, model in config.llm.models.items():
+        key = "not needed"
+        if model.api_key_env:
+            key = "set" if os.environ.get(model.api_key_env) else f"missing: {model.api_key_env}"
+        price = model.price_per_mtok
+        table.add_row(
+            name,
+            "local" if model.local else "cloud",
+            model.litellm_model,
+            f"{model.context_window:,}",
+            f"{price.input:g} / {price.output:g}",
+            model.structured_output,
+            key,
+        )
+    console.print(table)
+    cap = config.llm.max_usd_total
+    console.print(
+        f"Spending cap for cloud models: ${cap:.2f}, counted per command for now."
+        if cap is not None
+        else "No spending cap set (llm.max_usd_total): cloud models won't be called."
+    )
+
+
+@llm_app.command("check")
+def llm_check(
+    names: Annotated[list[str] | None, typer.Argument(help="Model names from `llm list`")] = None,
+    all_models: Annotated[bool, typer.Option("--all", help="Check every configured model")] = False,
+    config_path: ConfigOption = None,
+) -> None:
+    """Send each model a short made-up job and resume, and report what came back.
+
+    Nothing personal is sent. Cloud models are billed for this, a fraction of a cent.
+    """
+    config = load_config(config_path)
+    run_id = uuid.uuid4().hex
+    configure_logging(config.logging.file, run_id)
+    selected = list(config.llm.models) if all_models else list(names or [])
+    unknown = [name for name in selected if name not in config.llm.models]
+    if not selected or unknown:
+        known = ", ".join(config.llm.models) or "(none configured)"
+        if unknown:
+            console.print(f"[red]Unknown model: {', '.join(unknown)}.[/]")
+        console.print(f"Name the models to check, or use --all. Configured: {known}")
+        raise typer.Exit(1)
+
+    client = _llm_client(config.llm)
+    table = Table(title=f"Model check, run {run_id[:12]}")
+    table.add_column("Name")
+    table.add_column("Status")
+    table.add_column("Latency", justify="right")
+    table.add_column("Tokens in/out", justify="right")
+    table.add_column("Cost", justify="right")
+    table.add_column("Answer or problem", overflow="fold")
+    passed = 0
+    for name in selected:
+        with console.status(f"Checking {name}..."):
+            result = run_check(client, name)
+        ok = result.status is CallStatus.OK
+        passed += ok
+        if ok and result.parsed is not None:
+            note = (
+                f"fit {result.parsed.fit_score}/5, matched "
+                f"{', '.join(result.parsed.matched_skills) or 'nothing'}"
+            )
+            if result.served_model:
+                note += f" (served by {result.served_model})"
+        else:
+            note = result.error or ""
+        approx = "~" if result.tokens_estimated else ""
+        table.add_row(
+            name,
+            f"[green]{result.status.value}[/]" if ok else f"[red]{result.status.value}[/]",
+            f"{result.latency_ms / 1000:.1f}s" if result.attempts else "-",
+            f"{approx}{result.input_tokens} / {approx}{result.output_tokens}",
+            f"${result.cost_usd:.4f}",
+            note,
+        )
+    console.print(table)
+    console.print(
+        f"{passed} of {len(selected)} passed. Total cost: ${client.spent_micros / 1e6:.4f}."
+    )
+    if passed < len(selected):
+        raise typer.Exit(1)
+
+
+def _llm_client(config: LLMConfig) -> LLMClient:
+    # Imported here: loading litellm takes a few seconds, and only llm commands need it.
+    from jobsearch.llm.providers.litellm_provider import LiteLLMProvider
+
+    return LLMClient(config, LiteLLMProvider())
