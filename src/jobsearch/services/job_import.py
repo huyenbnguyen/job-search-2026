@@ -1,9 +1,15 @@
 """Import staged `JobFetchRecord`s (JSONL) into the database.
 
 Safe to rerun: jobs are matched on `job_key` and fetch attempts on (job, run ID), so
-importing the same file twice adds nothing. A job keeps the first description fetched.
-Later text that differs is counted and its hash stays on the fetch attempt, but the
-stored description never changes, so labels and predictions keep referring to it.
+importing the same file twice adds nothing. Run it inside `session_scope`, which takes
+SQLite's write lock before the first read: two imports (or an import and `db
+set-company`) then run one after the other, so each lookup, company check, and
+first-description check sees the latest committed rows and can't be overtaken before its
+write. The unique constraints on `job_key` and (job, run ID) remain as a backstop.
+
+A job keeps the first description fetched. Later text that differs is counted and its
+hash stays on the fetch attempt, but the stored description never changes, so labels
+and predictions keep referring to it.
 
 `jobs.company` holds the best-known company. A record's company replaces it only
 when it comes from a more reliable source (see CompanySource), so a URL hint never

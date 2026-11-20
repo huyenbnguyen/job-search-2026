@@ -79,7 +79,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DROP VIEW jobs_overview")
-    with op.batch_alter_table("jobs", schema=None) as batch_op:
-        batch_op.drop_column("company_source")
-        batch_op.drop_column("company")
+    # ALTER TABLE ... DROP COLUMN (SQLite 3.35+), not a batch rebuild: rebuilding jobs
+    # drops the table while job_versions and job_fetch_attempts rows still reference it.
+    op.drop_column("jobs", "company_source")
+    op.drop_column("jobs", "company")
     op.execute(_overview("v.company"))

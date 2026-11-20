@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from alembic.autogenerate import compare_metadata
+from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import Engine, func, select, text
 from sqlalchemy.exc import IntegrityError
@@ -548,3 +549,152 @@ def test_upgrade_from_0002_keeps_jobs_and_downgrade_restores_view(
     engine.dispose()
     assert tuple(row) == ("Software Engineer", "Example Corp")
     assert "human_labels" not in tables and "fit_predictions" not in tables
+
+
+def _alembic_config(database: DatabaseConfig) -> Config:
+
+    config = Config("alembic.ini")
+    config.attributes["database"] = database
+    return config
+
+
+def test_failed_migration_rolls_back_its_ddl(
+    database: DatabaseConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from alembic.operations import Operations
+
+    upgrade_database(database, "0001")
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("injected failure after DROP VIEW")
+
+    # 0002 drops jobs_overview, then alters jobs: fail at the alter.
+    monkeypatch.setattr(Operations, "batch_alter_table", fail)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        upgrade_database(database, "0002")
+    engine = make_engine(database)
+    with engine.connect() as connection:
+        view = connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE type = 'view' AND name = 'jobs_overview'")
+        ).scalar()
+        revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        columns = [row[1] for row in connection.execute(text("PRAGMA table_info(jobs)"))]
+    engine.dispose()
+    assert view is not None and "v.company" in view
+    assert revision == "0001"
+    assert "company" not in columns
+
+
+def test_each_migration_commits_on_its_own(
+    database: DatabaseConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from alembic.operations import Operations
+
+    upgrade_database(database, "0001")
+    original = Operations.batch_alter_table
+    calls = []
+
+    def fail_after_0002(self: Operations, *args: object, **kwargs: object) -> object:
+        calls.append(args)
+        if len(calls) > 1:  # 0002 alters jobs once; the next alter belongs to 0003.
+            raise RuntimeError("injected failure in 0003")
+        return original(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Operations, "batch_alter_table", fail_after_0002)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        upgrade_database(database, "0003")
+    engine = make_engine(database)
+    with engine.connect() as connection:
+        revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        tables = {r[0] for r in connection.execute(text("SELECT name FROM sqlite_master"))}
+    engine.dispose()
+    assert revision == "0002"
+    assert "human_labels" not in tables
+
+
+def test_downgrade_to_0001_keeps_populated_jobs(database: DatabaseConfig) -> None:
+    from alembic import command
+
+    upgrade_database(database, "0003")
+    engine = make_engine(database)
+    _insert_at_0003(engine)
+    upgrade_database(database)
+    command.downgrade(_alembic_config(database), "0001")
+    with engine.connect() as connection:
+        jobs = connection.execute(text("SELECT id, job_key FROM jobs ORDER BY id")).all()
+        versions = connection.execute(text("SELECT job_id, title FROM job_versions")).all()
+        attempts = connection.execute(
+            text("SELECT job_id, job_version_id FROM job_fetch_attempts ORDER BY job_id")
+        ).all()
+        overview = connection.execute(
+            text("SELECT job_id, title FROM jobs_overview ORDER BY job_id")
+        ).all()
+        problems = connection.execute(text("PRAGMA foreign_key_check")).all()
+    engine.dispose()
+    assert [tuple(r) for r in jobs] == [(1, "k1"), (2, "k2")]
+    assert [tuple(r) for r in versions] == [(1, "T")]
+    assert [tuple(r) for r in attempts] == [(1, 1), (2, None)]
+    assert [tuple(r) for r in overview] == [(1, "T"), (2, None)]
+    assert problems == []
+
+
+def test_write_sessions_take_the_write_lock_before_reading(
+    database: DatabaseConfig, engine: Engine
+) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    impatient = make_engine(database.model_copy(update={"busy_timeout_ms": 1}))
+    with session_scope(engine) as first:
+        first.scalar(select(func.count()).select_from(Job))  # a read, before any write
+        # A second writer can't start, so it can't act on what the first one read...
+        with pytest.raises(OperationalError, match="locked"), session_scope(impatient) as second:
+            second.scalar(select(func.count()).select_from(Job))
+        # ...while plain reads still work alongside it (WAL).
+        with impatient.connect() as reader:
+            assert reader.execute(select(func.count()).select_from(Job)).scalar() == 0
+    with session_scope(impatient) as second:  # free again once the first commits
+        assert second.scalar(select(func.count()).select_from(Job)) == 0
+    impatient.dispose()
+
+
+def test_database_path_may_contain_url_characters(tmp_path: Path) -> None:
+    database = DatabaseConfig(path=tmp_path / "odd?mode=ro#1.db")
+    upgrade_database(database)
+    assert sorted(p.name for p in tmp_path.iterdir() if p.suffix == ".db") == ["odd?mode=ro#1.db"]
+    engine = make_engine(database)
+    check_schema_current(engine)
+    engine.dispose()
+
+
+def test_restore_from_backup(database: DatabaseConfig, engine: Engine, tmp_path: Path) -> None:
+    """The README's backup and restore steps, through the same SQLite online backup API
+    that the sqlite3 CLI's `.backup` and `.restore` use."""
+    import sqlite3
+    from contextlib import closing
+
+    def copy(source: Path, target: Path) -> None:
+        with closing(sqlite3.connect(source)) as src, closing(sqlite3.connect(target)) as dst:
+            src.backup(dst)
+
+    with session_scope(engine) as session:
+        import_records(session, [record()], applied=True)
+    backup = tmp_path / "jobsearch-backup.db"
+    copy(database.path, backup)
+    with session_scope(engine) as session:
+        import_records(
+            session, [record(run_id="run-2", key="greenhouse:examplecorp:2")], applied=True
+        )
+    assert counts(engine)[0] == 2
+    engine.dispose()  # step 2: nothing else has the database open
+
+    with closing(sqlite3.connect(backup)) as check:  # step 3: check the backup first
+        assert check.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    copy(backup, database.path)  # step 4: restore
+
+    upgrade_database(database)  # step 5: verify
+    restored = make_engine(database)
+    check_schema_current(restored)
+    with restored.connect() as connection:
+        assert connection.execute(text("PRAGMA integrity_check")).scalar() == "ok"
+    assert counts(restored) == (1, 1, 1)
+    restored.dispose()

@@ -20,8 +20,15 @@ def run_migrations_online() -> None:
     engine = make_engine(database)
     with engine.connect() as connection:
         # Batch mode lets later migrations alter SQLite tables (copy-and-move).
+        # SQLite's DDL is transactional once the driver stops committing around it (see
+        # jobsearch.database), so each migration's DDL, data changes and alembic_version
+        # update commit together or roll back together.
         context.configure(
-            connection=connection, target_metadata=target_metadata, render_as_batch=True
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=True,
+            transactional_ddl=True,
+            transaction_per_migration=True,
         )
         with context.begin_transaction():
             context.run_migrations()

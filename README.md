@@ -80,7 +80,28 @@ sqlite3 -header -column ~/.local/share/jobsearch/jobsearch.db \
   "SELECT job_id, title, company FROM jobs_overview WHERE last_status = 'fetched';"
 ```
 
-Backups: use SQLite's online backup, for example `sqlite3 <db> ".backup '<file>'"`, never a plain file copy while the app is running. The backup location and schedule are still TBD.
+### Backup and restore
+
+Back up with SQLite's online backup, which is safe while the app is running. A plain file copy isn't safe: it can catch the database mid-write and misses changes still in the `-wal` file.
+
+```bash
+sqlite3 ~/.local/share/jobsearch/jobsearch.db ".backup 'jobsearch-2026-11-19.db'"
+```
+
+The backup location and schedule are still TBD.
+
+To restore:
+1. **Pick the backup.** Use the newest one from before the problem. Name backups by date so this is easy.
+2. **Stop everything that uses the database.** Wait for any `jobsearch` command to finish and pause scheduled runs (from Phase 3). Restoring while something else has the file open can mix the two states.
+3. **Check the backup:** `sqlite3 <backup> "PRAGMA integrity_check;"` should print `ok`.
+4. **Restore it to the configured path** (`database.path`, by default `~/.local/share/jobsearch/jobsearch.db`):
+   ```bash
+   sqlite3 ~/.local/share/jobsearch/jobsearch.db ".restore 'jobsearch-2026-11-19.db'"
+   ```
+   `.restore` writes through SQLite, so the database's `-wal` and `-shm` files stay consistent. Don't copy the backup over the file by hand.
+5. **Verify:** `uv run jobsearch db upgrade` brings an older backup up to the current schema. Then `sqlite3 ~/.local/share/jobsearch/jobsearch.db "PRAGMA integrity_check; SELECT COUNT(*) FROM jobs;"` should print `ok` and the job count you expect.
+
+`tests/integration/test_database.py::test_restore_from_backup` runs these steps through the same SQLite backup API that `.backup` and `.restore` use.
 
 ## Development
 
