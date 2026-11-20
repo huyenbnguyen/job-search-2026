@@ -95,5 +95,5 @@ Follow-ups, open questions, or decision-log entries added.
 ```
 
 - Share the pull request link with the user.
-- For a stack, tell the user to merge in order, and to check that each pull request's base is `main` before merging it. GitHub retargets the next PR to `main` only when the merged branch gets deleted. Otherwise a PR merges into the previous branch and never reaches `main`, as happened to PRs #4–#7.
+- For a stack, tell the user to merge in order, and to check that each pull request's base is `main` before merging it. GitHub retargets the next PR to `main` only when the merged branch gets deleted.
 - Never merge the pull request yourself, and never force-push to `main`.
