@@ -28,9 +28,9 @@ Phase 1 is the main spike: whether an LLM can judge job fit the way you do is th
 
 **Decide before starting**
 - [x] Final wording of the 1–5 rubric anchors: the draft as written, now `prompts/job_matching/rubric_v1.md`
-- [ ] Which 2–3 models to compare, including whether to try a local one
-- [ ] Thin in-house provider adapters or a multi-provider library
-- [ ] Spending budget for experiments
+- [x] Which 2–3 models to compare, including whether to try a local one: Claude Sonnet 5.5 and Haiku 5.5, plus qwen3:14b and gpt-oss:20b on the local GPU
+- [x] Thin in-house provider adapters or a multi-provider library: LiteLLM, behind our own interface
+- [x] Spending budget for experiments: $20 in total (`llm.max_usd_total`)
 - [ ] Each cloud provider's API data-retention and training-use settings checked
 
 The steps below are a proposed breakdown; each one is usable on its own.
@@ -46,7 +46,7 @@ The steps below are a proposed breakdown; each one is usable on its own.
 *Usable outcome:* your applied-to jobs are in the database with your own scores.
 
 **1b. One model scores a job**
-- [ ] Provider-agnostic LLM interface and a first adapter
+- [x] Provider-agnostic LLM interface and a first adapter: `LLMClient` + LiteLLM; `jobsearch llm list` and `llm check`
 - [ ] Fit-scoring prompt (`fit_score_v1`): requirement-by-requirement status (met, partial, not met, unclear) with a quoted resume line, then an overall 1–5 score and rationale
 - [ ] Pydantic validation; code checks every quote against the resume
 - [ ] Deterministic coverage score computed from the requirement statuses

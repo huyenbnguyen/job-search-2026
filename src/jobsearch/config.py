@@ -2,17 +2,20 @@
 
 from collections.abc import Hashable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Self
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    NonNegativeFloat,
     PositiveFloat,
     PositiveInt,
     StrictInt,
     field_validator,
+    model_validator,
 )
 
 DEFAULT_CONFIG_PATH = Path("config/config.yaml")
@@ -98,11 +101,77 @@ class ScoringConfig(_Section):
     keyword_baseline: KeywordBaselineConfig = Field(default_factory=KeywordBaselineConfig)
 
 
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+class ModelPrice(_Section):
+    """US dollars per million tokens. Copied from the provider's price list; 0 for local."""
+
+    input: NonNegativeFloat
+    output: NonNegativeFloat
+
+
+class ModelConfig(_Section):
+    """One model the app can call. Adding a model to try is adding one of these."""
+
+    # The model in LiteLLM's "provider/model" form, e.g. "anthropic/claude-sonnet-5-5"
+    # or "ollama_chat/qwen3:14b".
+    litellm_model: str = Field(min_length=3)
+    # Runs on this machine (Ollama). Then api_base must point at localhost, so the
+    # resume can't leave the machine through a model marked local.
+    local: bool = False
+    api_base: str | None = None
+    # The name of the environment variable that holds the API key, never the key itself.
+    api_key_env: str | None = None
+    # The largest prompt plus answer the model accepts, in tokens. Checked before every
+    # call, because some runtimes cut off a long prompt silently instead of failing.
+    context_window: PositiveInt
+    max_output_tokens: PositiveInt = 8000
+    price_per_mtok: ModelPrice = Field(default_factory=lambda: ModelPrice(input=0, output=0))
+    # json_schema: the model is asked for JSON matching the schema natively.
+    # prompt_only: the schema is written into the prompt instead, for models without
+    # native support. Either way, the answer is validated before it's used.
+    structured_output: Literal["json_schema", "prompt_only"] = "json_schema"
+    # Extra settings passed to LiteLLM as they are, e.g. {num_ctx: 16384} for Ollama.
+    # Claude models reject temperature, so don't set it for them.
+    params: dict[str, Any] = Field(default_factory=dict)
+    timeout_seconds: PositiveFloat = 120.0
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        if self.max_output_tokens >= self.context_window:
+            raise ValueError("max_output_tokens must be smaller than context_window")
+        if self.local:
+            host = urlsplit(self.api_base or "").hostname
+            if host not in _LOCAL_HOSTS:
+                raise ValueError("a local model needs an api_base on localhost")
+            if self.api_key_env:
+                raise ValueError("a local model doesn't use api_key_env")
+        elif not self.api_key_env:
+            raise ValueError("a cloud model needs api_key_env (the API key's variable name)")
+        num_ctx = self.params.get("num_ctx")
+        if isinstance(num_ctx, int) and num_ctx < self.context_window:
+            raise ValueError("context_window can't be larger than params.num_ctx")
+        return self
+
+
+class LLMConfig(_Section):
+    # Total spend allowed on paid models, in US dollars. No default: until it's set,
+    # paid models are not called at all.
+    max_usd_total: NonNegativeFloat | None = None
+    # Retries apply only to temporary failures: timeouts, rate limits, server errors.
+    max_retries: int = Field(default=2, ge=0)
+    backoff_base_seconds: float = Field(default=2.0, ge=0)
+    # Models by the short name used on the command line, e.g. "sonnet".
+    models: dict[str, ModelConfig] = Field(default_factory=dict)
+
+
 class AppConfig(_Section):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
 
 
 def load_config(path: Path | None = None) -> AppConfig:

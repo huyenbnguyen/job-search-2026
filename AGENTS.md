@@ -91,6 +91,7 @@ Keep these current:
 - Import fetched jobs: `uv run jobsearch db import-jobs data/applied_jobs.jsonl`
 - Load your resume: `uv run jobsearch resume load docs/resume/<file>.pdf`; check the text with `uv run jobsearch resume show`
 - Keyword baseline scores: `uv run jobsearch score baseline` (shows scores only for jobs you've labeled)
+- AI models: `uv run jobsearch llm list`; try one with made-up data: `uv run jobsearch llm check <name>` (or `--all`)
 - Run evaluation: TBD
 
 Run tests, lint, and type checks before saying a change is done.

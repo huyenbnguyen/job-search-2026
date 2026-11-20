@@ -41,7 +41,10 @@ Records are stored locally. The only data sent anywhere today is the HTTP reques
 - **What they see:** the job URL or its board and job ID, your IP address, the configured `user_agent` (no name or email), and standard headers (`Accept`, `Accept-Encoding`). Each career-page site also gets a request for its `robots.txt`.
 - **What they don't see:** no resume text, labels, or other jobs from your list are sent with these requests.
 
-These requests are separate from LLM calls, which arrive in a later Phase 1 step. Those will send job and resume text to the LLM provider you configure, and this section will list what each call sends.
+**AI model calls** are separate from those requests:
+- **Local models** (`local: true` in config) run through Ollama on this machine. Config only accepts a `localhost` address for them, so nothing they're given leaves the machine.
+- **Cloud models** (Anthropic) receive the prompt over the API. Today the only prompt is `jobsearch llm check`'s made-up job and resume, nothing of yours. When scoring arrives (the next Phase 1 step), the prompt will hold a job description and your resume with email and phone removed. Check the provider's data-retention settings before that.
+- **Logs** record each call's model, status, latency, tokens and cost, never the prompt or the answer.
 
 ## Load your resume
 
@@ -69,6 +72,37 @@ It counts the skills from a fixed list that the job description mentions, and ho
 Scores go to `fit_predictions` with provider `baseline`. The command shows scores only for jobs you've already labeled, so the baseline can't anchor your own scores.
 
 How skills are matched, how the share maps onto 1–5 (with worked examples), the known limits, and what's stored: [docs/baseline_job_matching.md](docs/baseline_job_matching.md).
+
+## AI models
+
+The app talks to every model the same way, so trying a new one is a few lines of config. Models are listed under `llm.models` in `config/config.yaml`; `config/config.example.yaml` has Claude Sonnet 5.5, Claude Haiku 5.5, and two local models.
+
+**Local models (free, on your GPU)** run through [Ollama](https://ollama.com):
+
+```bash
+ollama pull qwen3:14b      # about 9 GB; fits a 16 GB GPU
+ollama pull gpt-oss:20b    # about 13 GB; one model in GPU memory at a time
+```
+
+**Cloud models** need an API key in an environment variable, never in the config file. Copy `.env.example` to `.env` (gitignored), fill in the key, and load it into your shell:
+
+```bash
+set -a; source .env; set +a
+```
+
+Paid models are only called when `llm.max_usd_total` is set: the total you allow, in US dollars. A call is refused before it's sent if it could take spend past the cap. For now the total is counted per command; once scoring stores its calls in the database (the next Phase 1 step), it will count across runs.
+
+**Check a model before using it.** `llm check` sends a short made-up job and resume and shows what came back:
+
+```bash
+uv run jobsearch llm list             # configured models, prices, and whether each API key is set
+uv run jobsearch llm check qwen3-14b  # one model
+uv run jobsearch llm check --all      # every model (cloud models cost a fraction of a cent)
+```
+
+For each model it shows a status, the **latency** (seconds until the answer arrived), the **tokens** in and out (the unit providers charge by, roughly ¾ of a word), and the **cost** (tokens × the price in config; $0 for local models). A model is ready when its status is `ok`. Any other status names the problem: `not_configured` (API key missing), `auth_error`, `timeout`, `invalid_output` (the answer wasn't the JSON asked for), `truncated` (the answer hit `max_output_tokens`), `context_overflow` (the prompt wouldn't fit; not sent), `budget_exhausted` (no cap set, or over it; not sent), and others.
+
+**Adding a model:** add an entry under `llm.models` with its LiteLLM name (`anthropic/<model-id>` or `ollama_chat/<model>`), its context window, and its price per million tokens from the provider's price list. Then run `llm check` on it.
 
 ## Database
 

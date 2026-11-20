@@ -31,6 +31,48 @@ scoring:
     # 80% or more scores 5. Equal-width bins, not fitted to your labels.
     threshold_percents: [20, 40, 60, 80]
 
+llm:
+  # Total spend allowed on paid (cloud) models, in US dollars. Without it, paid models
+  # are never called. Local models are free and don't count.
+  max_usd_total: 20
+  # Retries cover temporary failures only: timeouts, rate limits, server errors.
+  max_retries: 2
+  backoff_base_seconds: 2.0
+  # Models by short name. Check a new one with `jobsearch llm check <name>` first.
+  models:
+    sonnet:
+      litellm_model: anthropic/claude-sonnet-5-5
+      api_key_env: ANTHROPIC_API_KEY   # the variable's name; the key itself goes in .env
+      context_window: 1000000
+      # Includes the model's thinking, so leave room.
+      max_output_tokens: 16000
+      # From Anthropic's price list, US dollars per million tokens.
+      price_per_mtok: {input: 2.00, output: 10.00}
+      # No temperature: Claude models reject it.
+    haiku:
+      litellm_model: anthropic/claude-haiku-5-5
+      api_key_env: ANTHROPIC_API_KEY
+      context_window: 1000000
+      max_output_tokens: 16000
+      # For prompts up to 100K tokens, which covers a job plus a resume.
+      price_per_mtok: {input: 0.10, output: 0.50}
+    qwen3-14b:
+      litellm_model: ollama_chat/qwen3:14b
+      local: true
+      api_base: http://localhost:11434
+      # Ollama's own default context is small and it cuts long prompts silently, so set
+      # num_ctx; context_window can't be larger than it.
+      context_window: 16384
+      max_output_tokens: 8000
+      params: {num_ctx: 16384}
+    gpt-oss-20b:
+      litellm_model: ollama_chat/gpt-oss:20b
+      local: true
+      api_base: http://localhost:11434
+      context_window: 16384
+      max_output_tokens: 8000
+      params: {num_ctx: 16384}
+
 logging:
   # Structured JSON log file. Keep it outside the repository or under data/.
   file: data/logs/jobsearch.log
