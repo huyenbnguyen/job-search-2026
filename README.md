@@ -90,7 +90,7 @@ ollama pull gpt-oss:20b    # about 13 GB; one model in GPU memory at a time
 set -a; source .env; set +a
 ```
 
-Paid models are only called when `llm.max_usd_total` is set: the total you allow, in US dollars. A call is refused before it's sent if it could take spend past the cap. For now the total is counted per command; once scoring stores its calls in the database (the next Phase 1 step), it will count across runs.
+Cloud models are only called when `llm.max_usd_total` is set: the total you allow, in US dollars. Each attempt, retries included, is refused before it's sent if it could take spend past the cap, and a timed-out attempt is counted at its worst-case cost, since the provider may still bill it. For now the total is counted per command; once scoring stores its calls in the database (the next Phase 1 step), it will count across runs.
 
 **Check a model before using it.** `llm check` sends a short made-up job and resume and shows what came back:
 

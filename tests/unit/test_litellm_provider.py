@@ -19,6 +19,7 @@ CLOUD = ModelConfig(
     api_key_env="TEST_ANTHROPIC_KEY",
     context_window=100_000,
     max_output_tokens=1000,
+    price_per_mtok={"input": 0.1, "output": 0.5},
     params={"reasoning_effort": "low"},
 )
 LOCAL = ModelConfig(

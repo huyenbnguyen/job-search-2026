@@ -3,11 +3,14 @@
 For every call it:
 1. estimates the prompt's size and refuses to send one that wouldn't fit the model's
    context window (some runtimes silently cut long prompts instead of failing);
-2. for paid models, refuses a call that could take spend past `llm.max_usd_total`;
+2. for cloud models, refuses an attempt that could take spend past `llm.max_usd_total`,
+   checked again before every retry;
 3. retries temporary failures (timeouts, rate limits, server errors) with backoff;
-4. records latency, tokens and cost;
+4. records latency, tokens and cost; a timed-out cloud attempt counts at its worst-case
+   cost, because the provider may have processed and billed it;
 5. validates the answer against the requested schema.
-Whatever goes wrong becomes an `LLMResult` status, never an exception.
+Whatever goes wrong with the call becomes an `LLMResult` status, never an exception.
+The exception is a programming error: an unknown model name raises UnknownModelError.
 """
 
 import json
@@ -16,6 +19,7 @@ import math
 import random
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from pydantic import BaseModel
@@ -31,6 +35,9 @@ SCHEMA_INSTRUCTION_FILE = PROMPTS_DIR / "llm" / "json_schema_instruction_v1.md"
 # English averages closer to 4). Used only before the call, for the context-window and
 # budget checks, so an estimate that's too high is the safe direction.
 _CHARS_PER_TOKEN = 3
+# Providers add tokens of their own to a prompt (message formatting, the scaffolding for
+# structured output), so the budget check reserves this many more input tokens.
+_PROVIDER_OVERHEAD_TOKENS = 1000
 
 logger = logging.getLogger(__name__)
 
@@ -94,59 +101,79 @@ class LLMClient:
                         f"{model.max_output_tokens} for the answer that exceeds the "
                         f"{model.context_window}-token context window"
                     ),
-                )
+                ),
+                request,
             )
-        if refusal := self._budget_refusal(model, estimated_input):
-            return self._finish(LLMResult(alias, CallStatus.BUDGET_EXHAUSTED, error=refusal))
-
-        completion, latency_ms, attempts, failure = self._send(model, messages, json_schema)
-        if completion is None:
-            assert failure is not None
-            return self._finish(
-                LLMResult(
-                    alias,
-                    failure.status,
-                    latency_ms=latency_ms,
-                    attempts=attempts,
-                    error=str(failure),
-                )
-            )
-        return self._finish(
-            self._result(alias, model, request, completion, estimated_input, latency_ms, attempts)
-        )
-
-    def _budget_refusal(self, model: ModelConfig, estimated_input: int) -> str | None:
-        price = model.price_per_mtok
-        if price.input == 0 and price.output == 0:
-            return None
-        cap = self._config.max_usd_total
-        if cap is None:
-            return "llm.max_usd_total isn't set; paid models aren't called without a spending cap"
-        worst_case = cost_micros(model, estimated_input, model.max_output_tokens)
-        cap_micros = round(cap * 1_000_000)
-        if self._spent_micros + worst_case > cap_micros:
-            return (
-                f"could cost up to ${worst_case / 1e6:.4f}; spent ${self._spent_micros / 1e6:.4f} "
-                f"of the ${cap:.2f} cap"
-            )
-        return None
-
-    def _send(
-        self, model: ModelConfig, messages: tuple[Message, ...], json_schema: dict[str, Any] | None
-    ) -> tuple[Completion | None, int, int, ProviderError | None]:
+        worst_case = self._worst_case_micros(model, estimated_input)
+        charged = 0  # assumed cost of timed-out attempts
         attempt = 0
         while True:
+            if refusal := self._budget_refusal(model, worst_case):
+                return self._finish(
+                    LLMResult(
+                        alias,
+                        CallStatus.BUDGET_EXHAUSTED,
+                        attempts=attempt,
+                        cost_micros=charged,
+                        error=refusal,
+                    ),
+                    request,
+                )
             attempt += 1
             started = self._clock()
             try:
                 completion = self._provider.complete(model, messages, json_schema)
             except ProviderError as exc:
+                failure = exc
+            except Exception as exc:  # A provider bug must not end a whole run.
+                failure = ProviderError(
+                    CallStatus.PROVIDER_ERROR, f"unexpected {type(exc).__name__}"
+                )
+            else:
                 latency_ms = round((self._clock() - started) * 1000)
-                if not exc.retryable or attempt > self._config.max_retries:
-                    return None, latency_ms, attempt, exc
-                self._sleep(self._backoff(attempt - 1))
-                continue
-            return completion, round((self._clock() - started) * 1000), attempt, None
+                result = self._result(
+                    alias, model, request, completion, estimated_input, latency_ms, attempt
+                )
+                if charged:
+                    result = replace(result, cost_micros=result.cost_micros + charged)
+                return self._finish(result, request)
+            latency_ms = round((self._clock() - started) * 1000)
+            if failure.status is CallStatus.TIMEOUT and worst_case:
+                charged += worst_case
+                self._spent_micros += worst_case
+            if not failure.retryable or attempt > self._config.max_retries:
+                return self._finish(
+                    LLMResult(
+                        alias,
+                        failure.status,
+                        latency_ms=latency_ms,
+                        attempts=attempt,
+                        cost_micros=charged,
+                        error=str(failure),
+                    ),
+                    request,
+                )
+            self._sleep(self._backoff(attempt - 1))
+
+    def _worst_case_micros(self, model: ModelConfig, estimated_input: int) -> int:
+        """The most one attempt could cost: 0 for local models."""
+        if model.local:
+            return 0
+        tokens_in = estimated_input + _PROVIDER_OVERHEAD_TOKENS
+        return cost_micros(model, tokens_in, model.max_output_tokens)
+
+    def _budget_refusal(self, model: ModelConfig, worst_case: int) -> str | None:
+        if model.local:
+            return None
+        cap = self._config.max_usd_total
+        if cap is None:
+            return "llm.max_usd_total isn't set; cloud models aren't called without a spending cap"
+        if self._spent_micros + worst_case > round(cap * 1_000_000):
+            return (
+                f"could cost up to ${worst_case / 1e6:.4f}; spent ${self._spent_micros / 1e6:.4f} "
+                f"of the ${cap:.2f} cap"
+            )
+        return None
 
     def _result[T: BaseModel](
         self,
@@ -194,12 +221,13 @@ class LLMClient:
             error=error,
         )
 
-    def _finish[T: BaseModel](self, result: LLMResult[T]) -> LLMResult[T]:
+    def _finish[T: BaseModel](self, result: LLMResult[T], request: LLMRequest[T]) -> LLMResult[T]:
         # Counts and statuses only: prompts and answers can contain resume text.
         logger.info(
             "llm call",
             extra={
                 "model_alias": result.model_alias,
+                "prompt_version": request.prompt_version,
                 "served_model": result.served_model,
                 "status": result.status.value,
                 "latency_ms": result.latency_ms,

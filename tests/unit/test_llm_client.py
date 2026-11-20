@@ -19,8 +19,13 @@ class Answer(BaseModel):
     score: int = Field(ge=1, le=5)
 
 
-REQUEST = LLMRequest(messages=(Message("user", "Score this made-up job."),), output_schema=Answer)
+REQUEST = LLMRequest(
+    messages=(Message("user", "Score this made-up job."),),
+    output_schema=Answer,
+    prompt_version="test/answer_v1",
+)
 
+FREE = ModelPrice(input=0, output=0)
 LOCAL = ModelConfig(
     litellm_model="ollama_chat/test-model",
     local=True,
@@ -178,7 +183,9 @@ def test_permanent_failures_are_not_retried() -> None:
 def test_prompt_too_big_for_the_context_window_is_not_sent() -> None:
     provider = ScriptedProvider()
     client, _ = make_client(provider)
-    big = LLMRequest(messages=(Message("user", "x" * 12_000),), output_schema=Answer)
+    big = LLMRequest(
+        messages=(Message("user", "x" * 12_000),), output_schema=Answer, prompt_version="t"
+    )
     result = client.complete("m", big)
     assert result.status is CallStatus.CONTEXT_OVERFLOW
     assert provider.calls == []
@@ -199,6 +206,53 @@ def test_call_that_could_pass_the_cap_is_not_sent() -> None:
     client, _ = make_client(provider, cap=1.0, spent=995_000, paid=PAID)
     assert client.complete("paid", REQUEST).status is CallStatus.BUDGET_EXHAUSTED
     assert provider.calls == []
+
+
+def test_budget_is_checked_again_before_each_retry() -> None:
+    # Worst case per attempt: (prompt estimate + 1000 overhead) x $2/M + 1000 x $10/M,
+    # a little over 12,000 micro-dollars. The cap leaves room for one attempt only.
+    provider = ScriptedProvider(
+        ProviderError(CallStatus.TIMEOUT, "too slow", retryable=True),
+        ok(),
+    )
+    client, _ = make_client(provider, cap=0.02, paid=PAID)
+    result = client.complete("paid", REQUEST)
+    assert result.status is CallStatus.BUDGET_EXHAUSTED
+    assert result.attempts == 1
+    assert len(provider.calls) == 1
+
+
+def test_timed_out_cloud_attempt_counts_at_its_worst_case() -> None:
+    provider = ScriptedProvider(
+        ProviderError(CallStatus.TIMEOUT, "too slow", retryable=True),
+        ok(),
+    )
+    client, _ = make_client(provider, cap=1.0, paid=PAID)
+    result = client.complete("paid", REQUEST)
+    assert result.status is CallStatus.OK
+    assert result.attempts == 2
+    assert result.cost_micros > 12_000 + 400  # the timeout's worst case plus the answer
+    assert client.spent_micros == result.cost_micros
+
+
+def test_rate_limited_attempt_costs_nothing() -> None:
+    provider = ScriptedProvider(
+        ProviderError(CallStatus.RATE_LIMITED, "slow down", retryable=True),
+        ok(),
+    )
+    client, _ = make_client(provider, cap=1.0, paid=PAID)
+    assert client.complete("paid", REQUEST).cost_micros == 400
+
+
+def test_unexpected_provider_exception_becomes_a_status() -> None:
+    class BrokenProvider:
+        def complete(self, *args: Any) -> Completion:
+            raise RuntimeError("bug in an adapter")
+
+    client = LLMClient(LLMConfig(models={"m": LOCAL}), BrokenProvider())
+    result = client.complete("m", REQUEST)
+    assert result.status is CallStatus.PROVIDER_ERROR
+    assert result.error == "unexpected RuntimeError"
 
 
 def test_local_models_ignore_the_cap() -> None:
@@ -222,12 +276,15 @@ def test_unknown_model_name() -> None:
 
 def test_logs_have_counts_but_no_prompt_or_answer_text(caplog: pytest.LogCaptureFixture) -> None:
     secret = "UNIQUE-SYNTHETIC-RESUME-LINE"
-    request = LLMRequest(messages=(Message("user", secret),), output_schema=Answer)
+    request = LLMRequest(
+        messages=(Message("user", secret),), output_schema=Answer, prompt_version="test/v1"
+    )
     client, _ = make_client(ScriptedProvider(ok(f'{{"score": 4, "note": "{secret}"}}')))
     with caplog.at_level("INFO", logger="jobsearch"):
         client.complete("m", request)
     [record] = [r for r in caplog.records if r.getMessage() == "llm call"]
     assert getattr(record, "status", None) == "invalid_output"
+    assert getattr(record, "prompt_version", None) == "test/v1"
     assert all(secret not in str(vars(r)) for r in caplog.records)
 
 
@@ -258,7 +315,19 @@ def test_parse_output_error_never_quotes_the_answer() -> None:
             "api_key_env",
         ),
         ({}, "api_key_env"),
-        ({"api_key_env": "K", "max_output_tokens": 16000}, "smaller than context_window"),
+        ({"api_key_env": "K"}, "price_per_mtok"),
+        (
+            {
+                "local": True,
+                "api_base": "http://localhost:11434",
+                "params": {"base_url": "https://elsewhere.example.com", "api_key": "x"},
+            },
+            "api_key, base_url",
+        ),
+        (
+            {"api_key_env": "K", "max_output_tokens": 16000, "price_per_mtok": FREE},
+            "smaller than context_window",
+        ),
         (
             {"local": True, "api_base": "http://127.0.0.1:11434", "params": {"num_ctx": 2048}},
             "num_ctx",
@@ -270,6 +339,13 @@ def test_model_config_rejects_unsafe_or_inconsistent_settings(
 ) -> None:
     with pytest.raises(ValidationError, match=message):
         ModelConfig(litellm_model="x/model", context_window=16000, **fields)
+
+
+def test_cloud_model_may_state_a_zero_price_explicitly() -> None:
+    model = ModelConfig(
+        litellm_model="x/free-model", api_key_env="K", context_window=16000, price_per_mtok=FREE
+    )
+    assert model.price_per_mtok == FREE
 
 
 def test_spend_cap_has_no_default() -> None:

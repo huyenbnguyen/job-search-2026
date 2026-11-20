@@ -32,8 +32,9 @@ scoring:
     threshold_percents: [20, 40, 60, 80]
 
 llm:
-  # Total spend allowed on paid (cloud) models, in US dollars. Without it, paid models
-  # are never called. Local models are free and don't count.
+  # Spend allowed on cloud models, in US dollars. Without it, cloud models are never
+  # called. Local models are free and don't count. Counted per command for now; it
+  # becomes a total across runs once scoring stores its calls in the database.
   max_usd_total: 20
   # Retries cover temporary failures only: timeouts, rate limits, server errors.
   max_retries: 2

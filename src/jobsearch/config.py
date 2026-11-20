@@ -102,6 +102,15 @@ class ScoringConfig(_Section):
 
 
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+# Settings that choose where a request goes or which credentials it uses. They have their
+# own fields (api_base, api_key_env), which are validated; params can't override them.
+_RESERVED_PARAMS = frozenset(
+    {
+        "api_base", "api_key", "api_version", "base_url", "custom_llm_provider",
+        "extra_headers", "fallbacks", "headers", "max_tokens", "messages", "model",
+        "num_retries", "response_format", "timeout",
+    }
+)  # fmt: skip
 
 
 class ModelPrice(_Section):
@@ -127,6 +136,7 @@ class ModelConfig(_Section):
     # call, because some runtimes cut off a long prompt silently instead of failing.
     context_window: PositiveInt
     max_output_tokens: PositiveInt = 8000
+    # Required for cloud models, so a missing price can't make a paid model look free.
     price_per_mtok: ModelPrice = Field(default_factory=lambda: ModelPrice(input=0, output=0))
     # json_schema: the model is asked for JSON matching the schema natively.
     # prompt_only: the schema is written into the prompt instead, for models without
@@ -136,6 +146,15 @@ class ModelConfig(_Section):
     # Claude models reject temperature, so don't set it for them.
     params: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: PositiveFloat = 120.0
+
+    @field_validator("params")
+    @classmethod
+    def _no_routing_params(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if reserved := sorted(_RESERVED_PARAMS & set(value)):
+            raise ValueError(
+                f"params can't set {', '.join(reserved)}: use the model's own fields instead"
+            )
+        return value
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -147,8 +166,11 @@ class ModelConfig(_Section):
                 raise ValueError("a local model needs an api_base on localhost")
             if self.api_key_env:
                 raise ValueError("a local model doesn't use api_key_env")
-        elif not self.api_key_env:
-            raise ValueError("a cloud model needs api_key_env (the API key's variable name)")
+        else:
+            if not self.api_key_env:
+                raise ValueError("a cloud model needs api_key_env (the API key's variable name)")
+            if "price_per_mtok" not in self.model_fields_set:
+                raise ValueError("a cloud model needs price_per_mtok, from its price list")
         num_ctx = self.params.get("num_ctx")
         if isinstance(num_ctx, int) and num_ctx < self.context_window:
             raise ValueError("context_window can't be larger than params.num_ctx")
@@ -156,8 +178,9 @@ class ModelConfig(_Section):
 
 
 class LLMConfig(_Section):
-    # Total spend allowed on paid models, in US dollars. No default: until it's set,
-    # paid models are not called at all.
+    # Spend allowed on cloud models, in US dollars. No default: until it's set, cloud
+    # models are not called at all. Counted per command for now; it becomes a total
+    # across runs once scoring stores its calls in the database.
     max_usd_total: NonNegativeFloat | None = None
     # Retries apply only to temporary failures: timeouts, rate limits, server errors.
     max_retries: int = Field(default=2, ge=0)

@@ -388,9 +388,9 @@ def llm_list(config_path: ConfigOption = None) -> None:
     console.print(table)
     cap = config.llm.max_usd_total
     console.print(
-        f"Spending cap for paid models: ${cap:.2f}"
+        f"Spending cap for cloud models: ${cap:.2f}, counted per command for now."
         if cap is not None
-        else "No spending cap set (llm.max_usd_total): paid models won't be called."
+        else "No spending cap set (llm.max_usd_total): cloud models won't be called."
     )
 
 

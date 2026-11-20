@@ -43,6 +43,9 @@ class LLMRequest[T: BaseModel]:
     messages: tuple[Message, ...]
     # The answer must be a JSON object matching this model.
     output_schema: type[T]
+    # The prompt file the messages came from, e.g. "llm_check/check_v1". Logged and,
+    # once scoring stores calls, saved with every result.
+    prompt_version: str
 
 
 @dataclass(frozen=True)
