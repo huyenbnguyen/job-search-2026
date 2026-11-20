@@ -17,7 +17,7 @@ Why each tool in the job search tool was chosen, what was considered instead, an
 | Database access and migrations | SQLAlchemy + Alembic | Decided |
 | Embeddings (if ever needed) | Vectors in SQLite + NumPy; sqlite-vec if that gets slow | Proposed |
 | LLM providers | Provider-agnostic interface; cloud and local models both allowed | Decided |
-| Provider adapters | Thin in-house adapters or a multi-provider library | TBD |
+| Provider adapters | LiteLLM (pinned), behind our own `LLMClient` interface | Decided |
 | Tests | pytest | Decided |
 | Scheduling | cron or systemd timer, explicit timezone | Decided |
 | CI | GitHub Actions or equivalent | Proposed |
@@ -145,7 +145,16 @@ With those in place, moving to PostgreSQL is mostly a connection-string change p
 - A local model keeps resume text on your machine and has no per-call cost. It is kept only if its agreement with your scores is competitive with the cloud models.
 - Before sending resume text to a cloud provider, check its API data-retention and training-use settings.
 
-**Open (TBD):** thin in-house adapters or a multi-provider library. Record the choice here once made.
+**Provider adapters: LiteLLM behind our own interface.** *Status: decided by the user, 2026-11-19.*
+- **How it's wired:** scoring code calls `jobsearch.llm.client.LLMClient`. Only `llm/providers/litellm_provider.py` imports LiteLLM, so it can be replaced without touching callers. A model is a `llm.models` entry in config, and `jobsearch llm check <name>` tries it with made-up data before real use.
+- **Why:** one library reaches Anthropic and local Ollama models (and others later) with the same call. Adding a model is a config entry, not code.
+- **Alternative considered:** thin in-house adapters over each provider's official SDK. Less third-party code and behavior we fully own, but one adapter to write and maintain per provider.
+- **Safeguards, because LiteLLM is a large and fast-moving dependency:**
+  - Pinned to an exact version (1.106.7), locked with hashes in `uv.lock`. Releases 1.82.7 and 1.82.8 were compromised on PyPI in March 2026 and have been removed; upgrade deliberately, never with a loose range.
+  - `LITELLM_LOCAL_MODEL_COST_MAP=True` is set before import. Without it, importing LiteLLM downloads its price list from GitHub, which is a network call to something other than a model provider. A test checks that importing the provider makes no network lookups.
+  - Prices come from our config, not LiteLLM's price list. Token estimates before a call are our own (about 3 characters per token), because LiteLLM's token counter can download tokenizer files.
+  - LiteLLM's retries are off; `LLMClient` retries temporary failures itself. `drop_params` is off, so a setting a model doesn't support is an error instead of being silently dropped.
+- **Revisit when:** LiteLLM breaks a model we use, a security advisory affects it, or we only use one provider and an official SDK would be simpler.
 
 ---
 
