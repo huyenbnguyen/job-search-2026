@@ -244,8 +244,8 @@ Initial proposal: use one selected production configuration per task. Compare ca
 | Source | Type | Initial handling | Update |
 |---|---|---|---|
 | User-supplied resume | Personal document / parsed text | Parse to structured profile and evidence-backed facts; retain provenance and versions. | On user upload/edit. |
-| Job descriptions | Text from permitted source or user input | Normalize and version; preserve source URL and retrieval timestamp. | During discovery/import; cadence TBD. |
-| User feedback | Structured labels and optional notes | Store append-only and link to the exact prediction/job version. | As users review jobs and drafts. |
+| Job descriptions | Text from permitted source or user input | Normalize; keep the first description fetched and never overwrite it; preserve source URL and retrieval timestamp. | During discovery/import; cadence TBD. |
+| User feedback | Structured labels and optional notes | Store append-only and link to the exact prediction and job. | As users review jobs and drafts. |
 
 ### Chunking, Embeddings, Vector Store and Retrieval
 
@@ -536,6 +536,7 @@ External calls: permitted job sources; LLM provider(s)
 | Resume tailoring after job search and the feedback loop | Build after end-to-end job discovery and feedback; must include evidence mapping, clarifying questions, validation, and explicit user approval. |
 | Work authorization last | Explicitly deferred until after the rest of the planned product; location/work-arrangement preferences come earlier. |
 | No RAG, agents, or fine-tuning initially | No demonstrated need yet; revisit only if evaluation and scale justify the added complexity. |
+| One description per job, no version history | Companies rarely change job descriptions. The job keeps its first description, so labels and predictions always refer to one text. Fetch attempts record the hash of the text they returned; revisit if those show descriptions changing often. Replaces the earlier `job_versions` table, which kept every distinct description. |
 | Numeric targets, providers, budget, dates TBD | Not specified in discussion; must be chosen/measured rather than invented. |
 
 ### Open Decisions / Unknowns

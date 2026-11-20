@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, field_validator
 
 DEFAULT_CONFIG_PATH = Path("config/config.yaml")
 
@@ -57,7 +57,19 @@ class LoggingConfig(_Section):
     file: Path = Path("data/logs/jobsearch.log")
 
 
+class DatabaseConfig(_Section):
+    # Outside the repository, so the database file can never be committed.
+    path: Path = Field(default=Path("~/.local/share/jobsearch/jobsearch.db"), validate_default=True)
+    busy_timeout_ms: PositiveInt = 5000
+
+    @field_validator("path")
+    @classmethod
+    def _expand_home(cls, value: Path) -> Path:
+        return value.expanduser()
+
+
 class AppConfig(_Section):
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 

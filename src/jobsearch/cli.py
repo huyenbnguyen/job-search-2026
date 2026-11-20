@@ -10,16 +10,27 @@ import httpx
 import typer
 from rich.console import Console
 from rich.table import Table
+from sqlalchemy import Engine
 
-from jobsearch.config import load_config
-from jobsearch.models.job import FetchStatus, JobFetchRecord
+from jobsearch.config import DatabaseConfig, load_config
+from jobsearch.database import make_engine, session_scope
+from jobsearch.models.job import CompanySource, FetchStatus, JobFetchRecord
+from jobsearch.models.tables import Job
 from jobsearch.observability.logging import configure_logging
 from jobsearch.services.ingestion.applied_jobs import fetch_jobs, read_job_urls, write_jsonl
 from jobsearch.services.ingestion.fetch import SafeFetcher
 from jobsearch.services.ingestion.sources import FetchContext, default_adapters
 from jobsearch.services.ingestion.sources.base import normalize_url
+from jobsearch.services.job_import import import_records, read_records, set_job_company
+from jobsearch.services.migrations import (
+    SchemaOutOfDateError,
+    check_schema_current,
+    upgrade_database,
+)
 
 app = typer.Typer(no_args_is_help=True)
+db_app = typer.Typer(no_args_is_help=True, help="Local SQLite database.")
+app.add_typer(db_app, name="db")
 console = Console()
 ConfigOption = Annotated[Path | None, typer.Option("--config", help="Config YAML")]
 
@@ -87,3 +98,70 @@ def _display_url(url: str) -> str:
         return normalize_url(httpx.URL(url))
     except httpx.InvalidURL:
         return url
+
+
+def _current_engine(database: DatabaseConfig) -> Engine:
+    """An engine for the database, or exit if its schema needs `db upgrade` first."""
+    engine = make_engine(database)
+    try:
+        check_schema_current(engine)
+    except SchemaOutOfDateError as exc:
+        engine.dispose()
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+    return engine
+
+
+@db_app.command("upgrade")
+def db_upgrade(config_path: ConfigOption = None) -> None:
+    """Create the database if needed and apply all migrations."""
+    database = load_config(config_path).database
+    upgrade_database(database)
+    console.print(f"Database is up to date: {database.path}")
+
+
+@db_app.command("import-jobs")
+def db_import_jobs(
+    jsonl_path: Annotated[
+        Path, typer.Argument(exists=True, dir_okay=False, help="JSONL from fetch-applied")
+    ] = Path("data/applied_jobs.jsonl"),
+    applied: Annotated[bool, typer.Option(help="Mark these jobs as ones you applied to")] = True,
+    config_path: ConfigOption = None,
+) -> None:
+    """Import fetched job records. Safe to rerun: existing rows aren't duplicated."""
+    database = load_config(config_path).database
+    engine = _current_engine(database)
+    with session_scope(engine) as session:
+        summary = import_records(session, read_records(jsonl_path), applied=applied)
+    engine.dispose()
+    console.print(
+        f"Read {summary.records} records: {summary.jobs_created} new jobs, "
+        f"{summary.descriptions_added} new job descriptions, "
+        f"{summary.descriptions_differed} differed from the stored text (kept the stored text), "
+        f"{summary.attempts_created} new fetch results, "
+        f"{summary.job_companies_updated} job companies set or improved."
+    )
+    console.print(f"Database: {database.path}")
+
+
+@db_app.command("set-company")
+def db_set_company(
+    job_id: Annotated[int, typer.Argument(help="job_id from jobs_overview")],
+    company: Annotated[str, typer.Argument(help="Company name")],
+    config_path: ConfigOption = None,
+) -> None:
+    """Set a job's company by hand. Automatic sources never replace it."""
+    name = company.strip()
+    if not name:
+        console.print("[red]Company name can't be empty.[/]")
+        raise typer.Exit(1)
+    database = load_config(config_path).database
+    engine = _current_engine(database)
+    with session_scope(engine) as session:
+        job = session.get(Job, job_id)
+        if job is None:
+            console.print(f"[red]No job with job_id {job_id}.[/]")
+            raise typer.Exit(1)
+        set_job_company(job, name, CompanySource.USER)
+        console.print(f"Job {job_id} ({job.job_key}): company set to {name!r}.")
+    engine.dispose()

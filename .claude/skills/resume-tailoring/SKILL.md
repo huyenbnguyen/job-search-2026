@@ -25,7 +25,7 @@ Don't start this until Phases 1–3 are done, unless the user asks.
 ## Review and export
 - Keep user edits distinct from model output.
 - Export (DOCX initially) only after explicit user approval.
-- Never overwrite the source resume. Each draft is versioned and tied to one job version.
+- Never overwrite the source resume. Each draft is versioned and tied to one job.
 
 ## Inputs
 - Validate uploaded resume file type and size.

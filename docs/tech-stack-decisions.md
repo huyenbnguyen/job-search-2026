@@ -14,7 +14,7 @@ Why each tool in the job search tool was chosen, what was considered instead, an
 | CLI | Typer + Rich | Decided |
 | LLM output validation | Pydantic | Decided |
 | Database | SQLite (one local file, WAL mode) | Decided |
-| Database access and migrations | SQLAlchemy + Alembic | Proposed |
+| Database access and migrations | SQLAlchemy + Alembic | Decided |
 | Embeddings (if ever needed) | Vectors in SQLite + NumPy; sqlite-vec if that gets slow | Proposed |
 | LLM providers | Provider-agnostic interface; cloud and local models both allowed | Decided |
 | Provider adapters | Thin in-house adapters or a multi-provider library | TBD |
@@ -31,7 +31,7 @@ Why each tool in the job search tool was chosen, what was considered instead, an
 
 ## Database: SQLite instead of PostgreSQL
 
-**Decision:** SQLite, one local file, accessed through SQLAlchemy with Alembic migrations. *Status: decided (SQLAlchemy and Alembic proposed).*
+**Decision:** SQLite, one local file, accessed through SQLAlchemy with Alembic migrations. *Status: decided. The user approved setting up the database in Phase 1a.*
 
 **History:** PostgreSQL was the first choice, when the plan assumed a production system for a few users with managed hosting. Once the scope changed to one user with all data kept local, the reasons for Postgres no longer applied.
 
@@ -254,7 +254,7 @@ Users can set a company by hand, and an automatic source never replaces it.
 - *Alternative rejected:* the standard library's `RobotFileParser`. It ignores wildcards and applies the first matching rule, so it allowed pages the site had disallowed.
 - *Alternative not adopted:* the `protego` library. It's correct, but it would be a new dependency for about 60 lines of matching that the tests cover.
 
-**Output:** a JSONL staging file of `JobFetchRecord`s. Each record has a stable `job_key` for dedupe, a `description_hash` to detect changed text, and its source URL and retrieval time.
+**Output:** a JSONL staging file of `JobFetchRecord`s. Each record has a stable `job_key` for dedupe, a `description_hash` to detect changed text, and its source URL and retrieval time. `db import-jobs` loads this file into SQLite.
 
 **Revisit when:** a new source is added (check its terms first), or the share of `no_details` records makes the manual fallback a burden.
 

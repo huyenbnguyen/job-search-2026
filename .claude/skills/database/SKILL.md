@@ -6,7 +6,7 @@ description: Rules for the local SQLite database — SQLAlchemy access, Alembic 
 # Database
 
 ## Setup
-- SQLAlchemy and Alembic remain proposed until the relevant phase-start decision. Ask the user before implementing database access or migrations.
+- SQLAlchemy and Alembic are in use (decided in Phase 1a). The schema is in `src/jobsearch/models/tables.py`, and migrations are in `migrations/versions/`.
 - SQLite, one local file, accessed through SQLAlchemy.
 - The database file lives outside the repository and is never committed. Its path comes from config.
 - Open every connection with WAL mode and a busy timeout, so a scheduled run and a CLI session can overlap safely.
@@ -22,9 +22,10 @@ description: Rules for the local SQLite database — SQLAlchemy access, Alembic 
 - Wrap each logical unit of work in a transaction.
 
 ## Versioning and provenance
-- Version job descriptions and resume profiles; never overwrite an earlier version.
+- A job keeps the first description fetched; never overwrite it. Fetch attempts record the hash of the text they returned.
+- Version resume profiles; never overwrite an earlier version.
 - Every job record keeps its source URL and retrieval timestamp.
-- Predictions reference the exact job version, resume version, model ID, prompt version, and rubric version they used.
+- Predictions reference the job, resume version, model ID, prompt version, and rubric version they used.
 - Human labels and model scores live in separate tables.
 - Feedback events are append-only.
 
