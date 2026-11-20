@@ -81,12 +81,12 @@ Business logic belongs in `services/`, so the Phase 6 API can reuse it.
 
 ## Commands
 
-Not yet decided. Fill these in once chosen, and keep them current:
+Keep these current:
 
-- Install: TBD
-- Run migrations: TBD (Alembic)
-- Run tests: TBD (pytest)
-- Lint / type check: TBD
+- Install: `uv sync`
+- Run tests: `uv run pytest`; one test: `uv run pytest tests/unit/test_fetch.py::test_redirect_limit`
+- Lint / format / type check: `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`
+- Fetch applied-job details: `uv run jobsearch fetch-applied data/applied_jobs.csv` (writes `data/applied_jobs.jsonl`)
 - Run evaluation: TBD
 
 Run tests, lint, and type checks before saying a change is done.
